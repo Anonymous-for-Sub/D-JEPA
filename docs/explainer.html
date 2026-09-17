@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An interactive tour of D-JEPA: explore candidate futures, relational alignment, complementary predictive geometries and decision-aligned future representations.">
+  <meta name="theme-color" content="#19151E">
+  <meta property="og:title" content="Inside D-JEPA · Interactive method explainer">
+  <meta property="og:description" content="Follow a candidate future from prediction to relational alignment and native-distance selection.">
+  <link rel="canonical" href="https://anonymous-for-sub.github.io/D-JEPA/explainer.html">
+  <link rel="icon" type="image/svg+xml" href="static/images/branding/jepa-icon-dark.svg" id="site-icon">
+  <link rel="stylesheet" href="static/css/explainer.css">
+  <title>Inside D-JEPA · An interactive explainer</title>
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('djepa-theme') === 'light' ? 'light' : 'dark'; } catch (_) {}</script>
+  <script type="module" src="static/js/explainer.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#explorer">Skip to interactive diagram</a>
+  <header class="explainer-header">
+    <a class="brand" href="index.html" aria-label="Back to the D-JEPA project"><img class="logo-dark" src="static/images/branding/jepa-icon-dark.svg" width="30" height="30" alt=""><img class="logo-light" src="static/images/branding/jepa-icon-light.svg" width="30" height="30" alt=""><b>D-JEPA</b><span class="header-divider"></span><span>Inside the model</span></a>
+    <div id="narration-caption" class="narration-caption" hidden><p id="narration-subtitle"></p><p id="narration-status" role="status"></p></div>
+    <button id="narration-exit" class="narration-exit" type="button" aria-label="Exit narrated tour" title="Exit narration" hidden>×</button>
+    <nav aria-label="Page navigation"><a href="index.html">Project <span aria-hidden="true">↗</span></a></nav>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="moon" d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/><g class="sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></g></svg><span id="theme-label">Dark</span></button>
+  </header>
+  <main>
+    <section id="explorer" class="workbench" aria-label="Interactive D-JEPA workbench">
+      <nav id="chapters" class="chapter-tabs" aria-label="Method stages">
+        <button type="button" data-stage="0" aria-current="step"><span>01</span>The prediction gap<i aria-hidden="true">→</i></button>
+        <button type="button" data-stage="1"><span>02</span>Predictive evidence<i aria-hidden="true">→</i></button>
+        <button type="button" data-stage="2"><span>03</span>Relational alignment<i aria-hidden="true">→</i></button>
+        <button type="button" data-stage="3"><span>04</span>Decision rule<i aria-hidden="true">→</i></button>
+        <button type="button" data-stage="4"><span>05</span>Representation lifting<i aria-hidden="true">→</i></button>
+        <button type="button" data-stage="5"><span>06</span>Action selection<i aria-hidden="true">→</i></button>
+      </nav>
+      <div class="stage-topline"><span id="focus-label">A shared start. Different actions.</span><span id="data-badge" class="small-tag">RECORDED EXECUTION</span></div>
+      <div id="focus-panel" class="stage-layout">
+        <div class="stage-canvas">
+          <svg id="architecture" class="context-strip" viewBox="0 0 760 42" role="img" aria-label="Active computation path"></svg>
+          <div id="diagram-viewport">
+            <svg id="detail-visual" viewBox="0 0 760 360" role="img" aria-label="Selected stage detail"></svg>
+            <section id="model-map" aria-label="Locate the operation inside D-JEPA" hidden>
+              <div class="model-map-toolbar"><div class="model-map-tabs" role="group" aria-label="Architecture view"><button data-map-mode="overview" aria-pressed="true">Overview</button><button data-map-mode="predictor" aria-pressed="false">Predictor adaptation</button><button data-map-mode="lifting" aria-pressed="false">Ordinal realization</button><button data-map-mode="transport" aria-pressed="false">Temporal transport</button></div><button id="model-map-close" aria-label="Return to detailed animation">Back to detail ↗</button></div>
+              <div class="model-map-heading"><h2 id="model-map-title"></h2><p id="model-map-note"></p></div>
+              <div class="model-map-canvas"><svg viewBox="0 0 830 375" role="img" aria-label="D-JEPA architecture and active module"></svg></div>
+            </section>
+            <div id="matrix-tooltip" role="status" hidden></div>
+          </div>
+          <div id="candidate-controls" class="candidate-controls" aria-label="Trace a candidate"></div>
+          <p id="visual-caption" class="visual-caption"></p>
+        </div>
+        <aside class="inspector">
+          <div class="inspector-copy" aria-live="polite">
+            <p id="detail-kicker" class="eyebrow"></p><h1 id="detail-title"></h1>
+            <p id="detail-description"></p>
+          </div>
+          <button id="model-map-toggle" class="model-map-toggle" aria-expanded="false" aria-controls="model-map" hidden>Locate in the world model <span aria-hidden="true">↗</span></button>
+          <div id="detail-formula" class="formula"></div>
+          <div id="stage-options" class="stage-options"></div>
+          <div id="experiment-controls">
+            <div class="source-control"><span>Predictive sources</span><div class="segmented" role="group" aria-label="Predictive source configuration"><button data-sources="2" aria-pressed="true">Two</button><button data-sources="4" aria-pressed="false">Four</button></div></div>
+            <label class="strength-control"><span>Correction bound <output id="strength-value" for="strength">0.20</output></span><input id="strength" type="range" min="0" max="0.2" step="0.005" value="0.2" aria-label="Illustrative correction bound"></label>
+            <div class="selection-readout"><span>Base <b id="base-choice">B</b></span><span>→</span><span>Aligned <b id="aligned-choice">A</b></span></div>
+          </div>
+          <details class="technical-note"><summary>Inside this step <span>+</span></summary><p id="detail-fact"></p><p id="model-note"></p></details>
+          <button id="supervision-toggle" class="quiet-button" aria-expanded="false" aria-controls="supervision-panel">Training supervision ↗</button>
+        </aside>
+      </div>
+      <div class="playback">
+        <button id="play" class="play-button" aria-label="Play guided tour"><span id="play-symbol">▶</span><span id="play-label">Play tour</span></button>
+        <button id="narration-play" class="narration-button" type="button" aria-label="Play narrated tour" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v-3a8 8 0 0 1 16 0v3M4 12H3v7h4v-7Zm16 0h1v7h-4v-7Z"/></svg><span id="narration-play-label">Narrated tour</span></button>
+        <button id="narration-mute" class="narration-mute" type="button" aria-label="Mute narration" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4ZM17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14"/></svg><span id="narration-mute-label">Sound</span></button>
+        <button id="previous" class="icon-button" aria-label="Previous stage">←</button>
+        <button id="next" class="icon-button" aria-label="Next stage">→</button>
+        <div class="timeline"><div class="timeline-meta"><span id="timeline-label">Candidate futures</span><output id="tour-time">00:00 / 01:20</output></div><input id="tour-seek" type="range" min="0" max="80.36" step=".02" value="0" aria-label="Guided tour timeline"></div>
+        <label class="speed-label"><span class="sr-only">Playback speed</span><select id="speed" aria-label="Tour playback speed"><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+        <button id="reset" class="quiet-button">Reset</button>
+        <button id="fullscreen" class="icon-button" aria-label="Enter fullscreen">⛶</button>
+      </div>
+      <dialog id="supervision-panel">
+        <button id="close-supervision" class="dialog-close" aria-label="Close training explanation">×</button>
+        <p class="eyebrow">LEARNING FROM EXECUTED OUTCOMES</p><h2>Teach the relations that determine the action.</h2>
+        <div class="training-flow"><span>Candidate futures</span><i>→</i><span>Executed outcomes</span><i>→</i><span>Relational alignment</span></div>
+        <p>Successful candidates receive decision mass. Local success–failure pairs sharpen the action boundary; the correction penalty keeps the update localized.</p>
+        <div class="formula">L = L<sub>success</sub> + λ<sub>local</sub>L<sub>local</sub> + λ<sub>trust</sub>‖δ‖²</div>
+        <p class="dialog-note">Outcomes supervise training. At selection time, the operator consumes predictive evidence.</p>
+      </dialog>
+      <dialog id="validation-dialog" aria-labelledby="validation-video-title">
+        <button id="close-validation" class="dialog-close" aria-label="Close task video">×</button>
+        <p class="eyebrow">CROSS-TASK VALIDATION</p>
+        <h2 id="validation-video-title"></h2>
+        <video id="validation-full-video" controls muted playsinline preload="none"></video>
+        <p id="validation-video-detail"></p>
+        <a id="validation-video-link" target="_blank" rel="noopener">Open original video ↗</a>
+      </dialog>
+      <noscript>Enable JavaScript to explore the model, or return to the <a href="index.html">project page</a>.</noscript>
+    </section>
+  </main>
+</body>
+</html>

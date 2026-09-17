@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "djepa"
+version = "0.1.0"
+description = "D-JEPA: A Decision-Aligned Latent World Model"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "torch>=2.3", "PyYAML>=6.0"]
+readme = "README.md"
+license = {file = "LICENSE"}
+
+[project.optional-dependencies]
+download = ["huggingface-hub>=0.24"]
+media = ["imageio>=2.31", "imageio-ffmpeg>=0.4.9"]
+dev = ["build>=1.2", "pytest>=7"]
+robotics-data = ["tensorflow-cpu>=2.15,<2.17", "tensorflow-datasets>=4.9,<5"]
+
+[project.urls]
+Homepage = "https://anonymous-for-sub.github.io/D-JEPA"
+Repository = "https://github.com/Anonymous-for-Sub/D-JEPA"
+Models = "https://anonymous-for-sub.github.io/D-JEPA/#release-availability"
+Dataset = "https://anonymous-for-sub.github.io/D-JEPA/#release-availability"
+
+[project.scripts]
+djepa-evaluate = "djepa.cli.evaluate:main"
+djepa-train = "djepa.cli.train:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

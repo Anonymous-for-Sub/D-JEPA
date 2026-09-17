@@ -1,0 +1,1195 @@
+import { relationMix } from './explainer-relations.mjs';
+import { createNarration } from './explainer-narration.mjs';
+import { createModelMap } from './explainer-model-map.mjs';
+import { VALIDATION_TASKS, validationFrame, syncValidationVideos, pauseValidationVideos, releaseValidationVideos } from './explainer-validation.mjs';
+import { pairPhase, latentMarkup, latentIntro, PAIR_INTRO_SECONDS, PAIR_STAGE_SECONDS, pairTimelinePhase, pairTimelineSeconds } from './explainer-pair.mjs';
+import { DIAGNOSTIC, problemPhase } from './explainer-problem.mjs';
+import { evidenceVector, evidencePhase } from './explainer-evidence.mjs';
+import { liftingProgress, liftingStep, liftingGeometry, decisionProgress } from './explainer-motion.mjs';
+import { sampleState, sceneMarkup, updateScenes } from './explainer-scenes.mjs';
+import { CANDIDATES, COSTS, example, attention, descriptor, realizedPoint, transportPoint } from './explainer-model.mjs';
+
+const $ = selector => document.querySelector(selector);
+const $$ = selector => [...document.querySelectorAll(selector)];
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const state = { stage: 0, candidate: 0, sources: 2, bound: 0.2, head: 0, lifting: 'ordinal', progress: 1, playing: false, speed: 1, elapsed: 0, supervision: false, recordCandidate:2, replay:true, comparing:false, hoverCandidate:null };
+const stageSeconds = [PAIR_STAGE_SECONDS, 10, 9, 10, 12, 26];
+const totalDuration = stageSeconds.reduce((a,b)=>a+b,0);
+let narration=null,narrationMotion={running:false,rate:1};
+let modelMap=null;
+let record = null;
+let previewCandidate = 0;
+let pair = null;
+let pairYaw = -.25;
+let orbitDrag = null;
+let phaseProgress = 0;
+let resumeAfterCompare = false;
+let currentContext = '';
+let previousTime = 0;
+let frame = 0;
+let slideFrame = 0;
+
+const fmt = (n, digits = 3) => n.toFixed(digits);
+const escapeText = text => String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+const text = (x, y, content, cls = 'svg-small', extra = '') => `<text x="${x}" y="${y}" class="${cls}" ${extra}>${escapeText(content)}</text>`;
+const rect = (x, y, w, h, fill = 'var(--panel)', stroke = 'var(--line)', radius = 7, extra = '') => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" fill="${fill}" stroke="${stroke}" ${extra}/>`;
+const line = (x1, y1, x2, y2, stroke = 'var(--line)', extra = '') => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" ${extra}/>`;
+const circle = (cx, cy, r, fill = 'var(--accent)', extra = '') => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" ${extra}/>`;
+const path = (d, cls = 'detail-line', extra = '') => `<path d="${d}" class="${cls}" ${extra}/>`;
+const tokenMark = (i, x, y, selected = i === state.candidate, size = 11) => '<g data-token="'+i+'">' + circle(x, y, size, selected ? 'var(--purple-soft)' : 'var(--panel)', `stroke="${selected ? 'var(--accent)' : 'var(--line)'}"`) + text(x, y + 3.5, CANDIDATES[i], selected ? 'svg-small svg-accent' : 'svg-small', 'text-anchor="middle"') + '</g>';
+const candidateHit = (i, x, y, w, h, contents) => `<g class="candidate-mark" data-candidate="${i}" role="button" tabindex="0" aria-label="Trace candidate ${CANDIDATES[i]}"><rect class="candidate-hit" x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" rx="5"/>${contents}</g>`;
+
+function tShape(x, y, angle = 0, scale = 1, fill = '#92A4B7', opacity = 1) {
+  return `<g transform="translate(${x} ${y}) rotate(${angle}) scale(${scale})" opacity="${opacity}"><path d="M-23 -16H23V-5H6V25H-6V-5H-23Z" fill="${fill}" stroke="${fill === '#92A4B7' ? '#8091A2' : fill}" stroke-width="1.2"/></g>`;
+}
+function miniatureScene(x, y, w, h, aligned = false) {
+  return rect(x, y, w, h, 'var(--scene-bg)', 'var(--line)', 8) +
+    tShape(x + w * .65, y + h * .43, 0, .6, '#95EE95', .65) +
+    tShape(x + w * (aligned ? .65 : .48), y + h * (aligned ? .43 : .61), aligned ? 0 : -29, .6) +
+    circle(x + w * .3, y + h * .78, 4, '#4A75E8');
+}
+
+const chapters = [
+  { kicker: '01 / THE CANDIDATE SET', title: 'One scene. Several possible futures.', description: 'Each candidate is an action sequence. Pretrained predictive models map the same context and candidate actions to future representations, which a planner compares with the goal.', formula: 'ẑᵢ,₁:ᴴ = F(context, actionᵢ)', fact: 'The relational operator processes the complete candidate set. Six are drawn here to make the computation visible.', visual: 'One context, six candidate futures', caption: 'The T-shaped scenes illustrate alternative futures. They are schematic, not decoded model predictions.' },
+  { kicker: '02 / THE PREDICTIVE EVIDENCE', title: 'Different geometries. Shared ordinal evidence.', description: 'Future–goal descriptors retain directional information inside each model. Candidate ranks express preferences on a common scale, forming a token for each possible action.', formula: 'vᵢ = [dᵢᴸ ; dᵢᵀ ; rᵢᴸ ; rᵢᵀ]', fact: 'Two 192-dimensional descriptors + two ranks → 386 dimensions → a shared 64-dimensional encoder.', visual: 'From future–goal descriptors to candidate tokens', caption: 'Small coloured cells stand for descriptor dimensions. Ranks are computed from the illustrative candidate costs.' },
+  { kicker: '03 / THE CORE OPERATOR', title: 'Learn the relations between futures.', description: 'Two Transformer layers compare candidates as a set. Shared attention lets each future use evidence from the alternatives; a rank-eight head produces a bounded score correction.', formula: 'δᵢ = ε tanh(Wup tanh(Wdown hᵢ))', fact: '2 layers · 4 attention heads · 64 → 8 → 1 correction head. Candidate permutations preserve the corresponding outputs.', visual: 'Candidate-to-candidate relations', caption: 'Attention and correction values are illustrative. Select a head and trace a candidate to inspect its relations.' },
+  { kicker: '04 / THE DECISION RULE', title: 'Refine the choices closest to execution.', description: 'The relational correction adjusts the base ordering. A calibrated margin gate selects the relational winner when its advantage supports a switch; otherwise it keeps the base action.', formula: 'sᵢ = bᵢ + δᵢ   ·   |δᵢ| ≤ ε', fact: 'The bound limits the correction. Move it toward zero to recover the base decision in this example.', visual: 'Base scores → bounded corrections → refined scores', caption: 'Lower scores are preferred. Gold marks the base winner; purple marks the gated aligned choice.' },
+  { kicker: '05 / REPRESENTATION LIFTING', title: 'Write the decision into the future.', description: 'Exact ordinal realization assigns each terminal future a goal-relative radius determined by its final rank. Native goal distance then recovers the learned order.', formula: 'z̃ᵢ,ᴴ = zgoal + [πᵢ / (K + 1)] uᵢ', fact: 'PushT exact realization retains the preceding future steps and embeds predictive and relational computation in one self-contained checkpoint.', visual: 'Aligned order → terminal future geometry', caption: 'Radii are shown in RMS units. The nearest realized future has rank 1; directions are retained.' },
+  { kicker: '06 / ACTION SELECTION', title: 'The native interface selects the aligned action.', description: 'The planner compares the realized futures with the goal, selects the nearest one and passes its corresponding action sequence to the environment.', formula: 'a* = arg minᵢ ‖z̃ᵢ,ᴴ − zgoal‖² / D', fact: 'The candidate identity connects the predicted future, aligned order and executed action sequence.', visual: 'A single decision, carried through the interface', caption: 'This is the final choice in the illustrative example. Recorded comparisons are available on the project page.' },
+];
+
+
+function evidenceDetail() {
+  const d=example(state), selected=state.candidate, names=['LeWM','TD-JEPA','JEPA-WM','DINO-WM'];
+  let s='';
+  ['Form goal-relative descriptors','Convert costs to ordinal evidence','Assemble and encode each token'].forEach((label,i)=>{
+    const x=16+i*247;
+    s+='<g data-evidence-step="'+i+'" role="button" tabindex="0" aria-label="'+label+'">';
+    s+=rect(x,5,235,36,'var(--surface)','var(--line)',8,'data-evidence-operation="'+i+'"');
+    s+=text(x+12,28,String(i+1),'svg-small svg-accent')+text(x+29,28,label,'svg-small');
+    s+='</g>';
+  });
+  s+=text(26,65,'Within each predictive geometry','svg-label');
+  for(let source=0;source<2;source++){
+    const y=81+source*100, color=source===0?'var(--blue)':'var(--purple)', values=evidenceVector(selected,source);
+    s+=rect(18,y,227,91,'var(--surface)','var(--line)',9);
+    s+=text(28,y+17,names[source],'svg-small')+text(231,y+17,'Candidate '+CANDIDATES[selected],'svg-tiny svg-accent','text-anchor="end"');
+    s+=text(29,y+37,'Future','svg-tiny')+text(29,y+57,'− Goal','svg-tiny')+text(29,y+78,'LN(Δ)','svg-tiny');
+    for(let j=0;j<8;j++){
+      const x=92+j*17;
+      s+=rect(x,y+26,12,13,color,'none',2,'opacity="'+(.22+.65*(values.future[j]+1.5)/3)+'"');
+      s+=rect(x,y+46,12,13,'var(--gold)','none',2,'opacity="'+(.3+.55*(values.goal[j]+.5))+'"');
+      s+='<rect data-evidence-difference="'+source+'" data-dimension="'+j+'" x="'+x+'" y="'+(y+26)+'" width="12" height="13" rx="2" fill="'+color+'"/>';
+    }
+  }
+  s+=text(27,291,'dᵐᵢ = LN(ẑᵐᵢ,H − zᵐgoal)','svg-mono');
+  s+=text(27,308,'8 shown / 192 dimensions per model','svg-tiny');
+  s+=line(255,60,255,309);
+  s+=text(274,65,'Order within each model','svg-label');
+  const step=state.sources===2?117:59, x0=state.sources===2?279:272;
+  Object.entries(COSTS).slice(0,state.sources).forEach(([key,costs],source)=>{
+    const x=x0+source*step;
+    s+=text(x,88,names[source],'svg-small');
+    s+='<text x="'+x+'" y="105" class="svg-tiny" data-evidence-heading="'+source+'">cost</text>';
+    costs.forEach((cost,id)=>{
+      s+='<g data-evidence-rank="'+id+'" data-source-index="'+source+'" data-linked-candidate="'+id+'">';
+      s+=rect(x-4,-12,step-8,23,id===selected?'var(--purple-soft)':'var(--surface)','none',4);
+      s+=tokenMark(id,x+6,0,id===selected,7);
+      s+='<text x="'+(x+step-17)+'" y="4" class="svg-mono" text-anchor="end" data-evidence-value="'+source+'-'+id+'"></text></g>';
+    });
+  });
+  s+=text(274,282,'rᵐᵢ = (rank − 1) / (K − 1)','svg-mono');
+  s+=text(274,300,'Lower cost → earlier rank → smaller r','svg-tiny');
+  s+=line(513,60,513,309);
+  s+=text(533,65,'Token for candidate '+CANDIDATES[selected],'svg-label svg-accent');
+  s+=rect(528,80,213,193,'var(--surface)','var(--line)',10);
+  const parts=[['dᴸ · 192','var(--blue)'],['dᵀ · 192','var(--purple)'],[state.sources+' ranks','var(--gold)']];
+  parts.forEach(([label,color],i)=>{
+    s+='<g data-evidence-piece="'+i+'">';
+    s+='<rect data-piece-box="'+i+'" width="164" height="26" rx="5" fill="'+color+'" fill-opacity=".2" stroke="'+color+'"/>';
+    s+='<text data-piece-label="'+i+'" y="17" class="svg-small" text-anchor="middle">'+label+'</text></g>';
+  });
+  s+='<g id="evidence-encoder"><path d="M634 175V215" class="trace-line"/>';
+  s+=rect(548,220,176,32,'var(--purple-soft)','var(--purple)',7);
+  s+=text(636,240,'Shared encoder · '+(state.sources===2?'386':'388')+' → 64','svg-small svg-accent','text-anchor="middle"');
+  s+='</g>';
+  s+=text(535,292,'192 + 192 + '+state.sources+' = '+(state.sources===2?'386':'388'),'svg-mono');
+  s+=text(535,308,'Token segments shown schematically','svg-tiny');
+  s+='<g id="evidence-bank">';
+  for(let i=0;i<6;i++){
+    const x=31+i*122;
+    s+='<g data-linked-candidate="'+i+'" data-evidence-output="'+i+'">';
+    s+=rect(x,323,109,27,i===selected?'var(--purple-soft)':'var(--surface)',i===selected?'var(--purple)':'var(--line)',7);
+    s+=tokenMark(i,x+14,336,i===selected,8);
+    s+=text(x+59,340,'64D token','svg-small','text-anchor="middle"');
+    s+='</g>';
+  }
+  s+='</g>';
+  return s;
+}
+function updateEvidence(svg) {
+  const phase=evidencePhase(phaseProgress), d=example(state);
+  const active=phaseProgress<.28?0:phaseProgress<.57?1:2;
+  svg.querySelectorAll('[data-evidence-operation]').forEach(n=>{
+    n.setAttribute('fill',Number(n.dataset.evidenceOperation)===active?'var(--purple-soft)':'var(--surface)');
+    n.setAttribute('stroke',Number(n.dataset.evidenceOperation)===active?'var(--purple)':'var(--line)');
+  });
+  for(let source=0;source<2;source++){
+    const values=evidenceVector(state.candidate,source), y=81+source*100;
+    svg.querySelectorAll('[data-evidence-difference="'+source+'"]').forEach(n=>{
+      const j=Number(n.dataset.dimension), normalized=values.normalized[j];
+      n.setAttribute('y',y+26+40*phase.difference);
+      n.setAttribute('opacity',String(.2+phase.difference*(.25+.45*Math.min(1,Math.abs(normalized)/1.7))));
+      n.setAttribute('fill',normalized>=0?(source===0?'var(--blue)':'var(--purple)'):'var(--peach)');
+    });
+  }
+  const entries=Object.entries(COSTS).slice(0,state.sources);
+  entries.forEach(([key,costs],source)=>{
+    const order=costs.map((value,id)=>({value,id})).sort((a,b)=>a.value-b.value).map(x=>x.id);
+    svg.querySelector('[data-evidence-heading="'+source+'"]').textContent=phase.sort<1?'cost ↓':'ordinal r ↓';
+    costs.forEach((value,id)=>{
+      const row=svg.querySelector('[data-evidence-rank="'+id+'"][data-source-index="'+source+'"]');
+      row.setAttribute('transform','translate(0 '+(125+(id+(order.indexOf(id)-id)*phase.sort)*24)+')');
+      svg.querySelector('[data-evidence-value="'+source+'-'+id+'"]').textContent=phase.sort<1?value.toFixed(2):d.sourceRanks[key][id].toFixed(1);
+    });
+  });
+  const finalX=[543,607,671], finalW=[62,62,54];
+  svg.querySelectorAll('[data-evidence-piece]').forEach(n=>{
+    const i=Number(n.dataset.evidencePiece), p=phase.pack;
+    n.setAttribute('transform','translate('+(550+(finalX[i]-550)*p)+' '+(99+i*40+(145-(99+i*40))*p)+')');
+    const w=164+(finalW[i]-164)*p;
+    svg.querySelector('[data-piece-box="'+i+'"]').setAttribute('width',w);
+    svg.querySelector('[data-piece-label="'+i+'"]').setAttribute('x',w/2);
+    n.style.opacity=String(.12+.88*(i<2?phase.difference:phase.sort));
+  });
+  svg.querySelector('#evidence-encoder').style.opacity=String(.1+.9*phase.encode);
+  svg.querySelectorAll('[data-evidence-output]').forEach(n=>{
+    const i=Number(n.dataset.evidenceOutput),p=Math.max(0,Math.min(1,(phase.encode-i*.045)/.775));
+    n.style.opacity=String(.08+.92*p);
+    n.setAttribute('transform','translate(0 '+(-14*(1-p))+')');
+  });
+}
+
+
+function relationsDetail() {
+  const weights=attention(state.head,state.sources),mix=relationMix(state.candidate,state.head,state.sources);
+  let s='';
+  ['Compare candidates','Aggregate evidence','Bound the update'].forEach((label,i)=>{
+    const x=16+i*247;
+    s+='<g data-relation-step="'+i+'" role="button" tabindex="0" aria-label="'+label+'">';
+    s+=rect(x,5,235,36,'var(--surface)','var(--line)',8,'data-relation-operation="'+i+'"');
+    s+=text(x+12,28,String(i+1),'svg-small svg-accent')+text(x+29,28,label,'svg-small')+'</g>';
+  });
+  s+=text(26,65,'Candidate tokens','svg-label');
+  s+=text(252,65,'Attention · head '+(state.head+1),'svg-label','text-anchor="middle"');
+  s+=text(438,65,'Evidence for '+CANDIDATES[state.candidate],'svg-label','text-anchor="middle"');
+  s+=text(650,65,'Bounded correction','svg-label','text-anchor="middle"');
+  const x0=174,y0=93,cell=27;
+  for(let i=0;i<6;i++){
+    const y=107+i*27;
+    s+='<g data-linked-candidate="'+i+'">';
+    s+=tokenMark(i,36,y,i===state.candidate,10);
+    for(let j=0;j<8;j++)s+=rect(53+j*9,y-7,6,14,'var(--purple)','none',2,'opacity="'+(.25+.7*descriptor(i,0,j))+'"');
+    s+=path('M127 '+y+'H150','detail-line','data-query-link="'+i+'"');
+    s+='</g>';
+    s+=text(x0-12,y+3,CANDIDATES[i],'svg-small','text-anchor="middle"');
+    s+=text(x0+i*cell+12,84,CANDIDATES[i],'svg-small','text-anchor="middle"');
+    for(let j=0;j<6;j++){
+      const value=weights[i][j],selected=i===state.candidate;
+      s+='<g class="matrix-cell" role="button" tabindex="0" data-row="'+i+'" data-col="'+j+'" data-weight="'+value+'" aria-label="Trace query '+CANDIDATES[i]+', source '+CANDIDATES[j]+'">';
+      s+=rect(x0+j*cell,y0+i*cell,24,24,'var(--purple)',selected?'var(--accent)':'none',4,'fill-opacity="'+(.12+value*1.8)+'"');
+      if(selected)s+=text(x0+j*cell+12,y0+i*cell+16,value.toFixed(2),'svg-tiny','text-anchor="middle"');
+      s+='</g>';
+    }
+    const ey=103+i*29,w=mix.weights[i];
+    s+='<g data-linked-candidate="'+i+'" data-message-source="'+i+'">';
+    s+=tokenMark(i,368,ey,i===state.candidate,8);
+    s+=rect(384,ey-5,Math.max(2,w*95),10,'var(--purple)','none',3);
+    s+=text(448,ey+3,w.toFixed(2),'svg-tiny','text-anchor="end"');
+    s+='<path data-message-path="'+i+'" d="M457 '+ey+'C492 '+ey+' 492 114 548 114" fill="none" stroke="var(--purple)" stroke-width="'+(1+w*5)+'" stroke-opacity=".25"/>';
+    s+='<circle data-message-pulse="'+i+'" r="'+(2+w*6)+'" fill="var(--accent)"/>';
+    s+='</g>';
+  }
+  s+=text(28,287,'Shared 64D tokens','svg-tiny');
+  s+=text(180,287,'Select a row to trace its query','svg-tiny');
+  s+=rect(554,79,186,62,'var(--surface)','var(--line)',9);
+  s+=text(647,97,'Σ αⱼvⱼ · head context','svg-small','text-anchor="middle"');
+  for(let j=0;j<8;j++){
+    s+='<rect data-mixed-cell="'+j+'" x="'+(568+j*20)+'" y="107" width="15" height="19" rx="3" fill="var(--purple)" fill-opacity=".08"/>';
+  }
+  s+='<path id="relation-head-link" d="M562 141V158" class="trace-line" pathLength="1"/>';
+  s+=text(647,153,'Combine heads · residual / FFN','svg-tiny','text-anchor="middle"');
+  s+='<g id="relation-head">';
+  s+=rect(554,160,186,66,'var(--purple-soft)','var(--purple)',9);
+  s+=text(647,181,'Shared low-rank head','svg-small','text-anchor="middle"');
+  s+=text(647,209,'64 → 8 → 1','svg-title svg-accent','text-anchor="middle"');
+  s+='</g>';
+  s+=text(647,246,'ε · tanh(·)','svg-mono','text-anchor="middle"');
+  s+=line(570,266,726,266,'var(--line)','stroke-width="4" stroke-linecap="round"');
+  s+=line(648,259,648,273,'var(--muted)');
+  s+='<path id="correction-segment" stroke="var(--purple)" stroke-width="4" stroke-linecap="round"/>';
+  s+='<circle id="correction-point" cy="266" r="5" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.5"/>';
+  s+=text(570,287,'−'+state.bound.toFixed(2),'svg-tiny','text-anchor="middle"')+text(726,287,'+'+state.bound.toFixed(2),'svg-tiny','text-anchor="middle"');
+  s+='<text id="relation-delta" x="648" y="310" class="svg-label svg-accent" text-anchor="middle"></text>';
+  s+=rect(16,323,726,28,'var(--purple-soft)','none',8);
+  s+='<text id="relation-takeaway" x="379" y="341" class="svg-small svg-accent" text-anchor="middle"></text>';
+  return s;
+}
+function updateRelations(svg) {
+  const mix=relationMix(state.candidate,state.head,state.sources,phaseProgress),p=mix.phase;
+  svg.querySelectorAll('[data-relation-operation]').forEach(n=>{
+    const active=Number(n.dataset.relationOperation)===p.step;
+    n.setAttribute('fill',active?'var(--purple-soft)':'var(--surface)');
+    n.setAttribute('stroke',active?'var(--purple)':'var(--line)');
+  });
+  svg.querySelectorAll('.matrix-cell').forEach(n=>{
+    const i=Number(n.dataset.row),reveal=smooth((phaseProgress-i*.027)/.16);
+    n.style.opacity=String((i===state.candidate?1:.45)*(.12+.88*reveal));
+  });
+  svg.querySelectorAll('[data-query-link]').forEach(n=>{
+    const selected=Number(n.dataset.queryLink)===state.candidate;
+    n.setAttribute('stroke',selected?'var(--accent)':'var(--line)');
+    n.setAttribute('stroke-width',selected?'2':'1');
+  });
+  mix.weights.forEach((w,i)=>{
+    const flow=p.messages[i],path=svg.querySelector('[data-message-path="'+i+'"]'),dot=svg.querySelector('[data-message-pulse="'+i+'"]');
+    path.style.strokeDasharray=path.getTotalLength();
+    path.style.strokeDashoffset=(1-flow)*path.getTotalLength();
+    path.setAttribute('stroke-opacity',String(.14+.4*flow));
+    const pos=path.getPointAtLength(flow*path.getTotalLength());
+    dot.setAttribute('cx',pos.x);dot.setAttribute('cy',pos.y);
+    dot.style.opacity=flow>0&&flow<1?'1':'0';
+  });
+  mix.mixed.forEach((value,j)=>{
+    const n=svg.querySelector('[data-mixed-cell="'+j+'"]');
+    n.setAttribute('fill',value<0?'var(--peach)':'var(--purple)');
+    n.setAttribute('fill-opacity',.12+.88*Math.abs(value));
+    n.setAttribute('data-value',value);
+  });
+  svg.querySelector('#relation-head').style.opacity=String(.12+.88*p.head);
+  svg.querySelector('#relation-head-link').style.strokeDasharray='1';
+  svg.querySelector('#relation-head-link').style.strokeDashoffset=1-p.head;
+  const delta=example(state).delta[state.candidate]*p.head,x=648+(state.bound?delta/state.bound:0)*78;
+  svg.querySelector('#correction-segment').setAttribute('d','M648 266H'+x);
+  svg.querySelector('#correction-point').setAttribute('cx',x);
+  svg.querySelector('#relation-delta').textContent='δ'+CANDIDATES[state.candidate]+' = '+(delta>0?'+':'')+fmt(delta);
+  svg.querySelector('#relation-takeaway').textContent=[
+    'Each candidate compares its evidence with the complete set.',
+    'Weighted messages gather context from the other possible futures.',
+    'A shared low-rank head turns contextual evidence into a bounded correction.',
+  ][p.step];
+}
+
+function decisionDetail() {
+  const d = example(state);
+  let s = text(65, 27, 'Candidate', 'svg-small') + text(183, 27, 'Base score b', 'svg-small') + text(373, 27, 'Correction δ', 'svg-small') + text(574, 27, 'Refined score s', 'svg-small');
+  for (let i = 0; i < 6; i++) {
+    const y = 61 + i * 33;
+    if (i === d.winner) s += rect(37, y - 15, 687, 30, 'var(--purple-soft)', 'none', 6);
+    s += tokenMark(i, 79, y, i === state.candidate, 10);
+    if (i === d.baseWinner) s += circle(106, y, 3, 'var(--gold)');
+    s += rect(166, y - 7, Math.max(2, d.base[i] * 140), 14, i === d.baseWinner ? 'var(--gold)' : 'var(--blue)', 'none', 3, 'opacity=".7"');
+    s += text(321, y + 4, fmt(d.base[i]), 'svg-mono', 'text-anchor="end"');
+    s += line(408, y - 13, 408, y + 13);
+    const barW = Math.abs(d.delta[i]) * 240;
+    s += rect(d.delta[i] < 0 ? 408 - barW : 408, y - 7, Math.max(.2, barW), 14, 'var(--purple)', 'none', 3);
+    s += text(483, y + 4, `${d.delta[i] > 0 ? '+' : ''}${fmt(d.delta[i])}`, 'svg-mono', 'text-anchor="end"');
+    s += text(512, y + 4, '=', 'svg-small');
+    s += rect(553, y - 7, Math.max(2, d.scores[i] * 108), 14, i === d.winner ? 'var(--purple)' : 'var(--blue)', 'none', 3, 'opacity=".8"');
+    s += text(705, y + 4, fmt(d.scores[i]), i === d.winner ? 'svg-mono svg-accent' : 'svg-mono', 'text-anchor="end"');
+  }
+  s += rect(37, 272, 687, 35, 'var(--surface)', 'var(--line)', 8);
+  s += text(54, 294, `Gate: advantage ${fmt(d.advantage)} ${d.admitted ? '>' : '≤'} ${fmt(d.threshold)}  →  ${d.admitted ? 'admit relational winner' : 'keep base winner'}`, 'svg-mono');
+  s += text(705, 294, `choose ${CANDIDATES[d.winner]}`, 'svg-label svg-accent', 'text-anchor="end"');
+  return s;
+}
+function liftingDetail() {
+  const d = example(state);
+  let s = '';
+  if (state.lifting === 'transport') {
+    s += text(40, 28, 'Five future steps · same candidate', 'svg-label');
+    s += text(711, 28, `Candidate ${CANDIDATES[state.candidate]}`, 'svg-small svg-accent', 'text-anchor="end"');
+    const points = Array.from({length: 5}, (_, t) => transportPoint(state.candidate, t, state.progress));
+    const map = p => [65 + p[0] * 790, 158 - p[1] * 275];
+    const base = points.map(p => map(p.source)), refined = points.map(p => map(p.refined));
+    s += path(base.map(([x,y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' '), 'detail-line', 'stroke-width="2" stroke-dasharray="4 5"');
+    s += path(refined.map(([x,y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' '), 'trace-line');
+    points.forEach((p, t) => {
+      const [x,y] = base[t], [xx,yy] = refined[t];
+      s += line(x, y, xx, yy, 'var(--purple)', 'stroke-width="6" opacity=".18"');
+      s += line(x, y, xx, yy, 'var(--purple)', 'stroke-width="1.5"') + circle(x,y,5,'none','stroke="var(--blue)"');
+      s += circle(xx,yy,11,'var(--purple)','opacity=".13"') + circle(xx,yy,5,'var(--accent)','data-transport-point="'+t+'"');
+      const card=22+t*148,mid=card+63,beta=p.beta*state.progress;
+      s += rect(card,239,126,66,'var(--surface)','var(--line)',8);
+      s += text(card+12,258,`t${t + 1}`,'svg-small');
+      s += text(card+114,258,fmt(beta),'svg-mono svg-accent','text-anchor="end" data-transport-beta="'+t+'"');
+      s += line(card+12,281,card+114,281,'var(--line)','stroke-width="3"');
+      s += line(mid,276,mid,286,'var(--blue)');
+      s += line(mid,281,mid+beta*510,281,'var(--purple)','stroke-width="3"');
+      s += circle(mid+beta*510,281,3.5,'var(--accent)');
+      s += line(mid+p.beta*510,275,mid+p.beta*510,287,'var(--purple)','opacity=".5"');
+      s += text(card+12,299,'−0.1','svg-tiny')+text(card+114,299,'+0.1','svg-tiny','text-anchor="end"');
+    });
+    s += text(380, 331, 'Corresponding future steps · bounded displacement at every step', 'svg-small', 'text-anchor="middle"');
+  } else { return ordinalLiftingDetail(); }
+  return s;
+}
+
+function ordinalLiftingDetail() {
+  const d=example(state), geometry=liftingGeometry(d,state.progress), selected=geometry[state.candidate];
+  const phase=state.comparing?0:phaseProgress,active=liftingStep(phase);
+  const convert=smooth((phase-.16)/.18),read=smooth((phase-.80)/.20);
+  const nearest=[...geometry].sort((a,b)=>a.cost-b.cost)[0].id;
+  const labels=['Read aligned rank','Set RMS radius','Rewrite terminal latent','Read native distance'];
+  let s='';
+  labels.forEach((label,i)=>{
+    const x=16+i*185;
+    s+='<g data-lift-step="'+i+'" role="button" tabindex="0" aria-label="'+(i+1)+'. '+label+'">';
+    s+=rect(x,5,171,38,i===active?'var(--purple-soft)':'var(--surface)',i===active?'var(--purple)':'var(--line)',9);
+    s+=text(x+11,28,String(i+1),i===active?'svg-small svg-accent':'svg-small')+text(x+29,28,label,'svg-small')+'</g>';
+  });
+  s+=text(26,77,'Aligned order','svg-label');
+  d.finalOrder.forEach((id,index)=>{
+    const y=109+index*28,chosen=id===state.candidate;
+    s+='<g data-linked-candidate="'+id+'" data-candidate="'+id+'" role="button" tabindex="0" aria-label="Trace candidate '+CANDIDATES[id]+'" opacity="'+(.4+.6*smooth((phase-index*.019)/.055))+'">';
+    s+=rect(19,y-16,159,26,chosen?'var(--purple-soft)':'var(--surface)',chosen?'var(--purple)':'none',6);
+    s+=tokenMark(id,35,y-3,chosen,8);
+    s+=text(59,y+1,'rank '+(index+1),'svg-small');
+    s+=rect(113,y-8,54,6,'var(--line)','none',3);
+    s+=rect(113,y-8,54*(index+1)/7*convert,6,chosen?'var(--accent)':'var(--purple)','none',3);
+    s+='</g>';
+  });
+  s+=text(26,279,'ρ = '+selected.rank+'/7 = '+fmt(selected.target),'svg-mono svg-accent');
+  s+=line(27,307,172,307,'var(--line)','stroke-width="3"');
+  s+=line(27,307,27+145*selected.target*convert,307,'var(--purple)','stroke-width="3"');
+  for(let tick=0;tick<=7;tick++){
+    const x=27+145*tick/7;
+    s+=line(x,302,x,312,tick===selected.rank?'var(--accent)':'var(--line)');
+  }
+  s+=circle(27+145*selected.target*convert,307,4.5,'var(--accent)','data-lift-radius-bead="true"');
+  s+=text(27,329,'0','svg-tiny')+text(172,329,'1','svg-tiny','text-anchor="end"');
+  s+=text(26,351,'Aligned rank sets the target radius.','svg-tiny');
+
+  const cx=358,cy=185,scale=90;
+  s+=text(cx,77,'Rewrite the terminal future','svg-label','text-anchor="middle"');
+  [1,2,3,4,5,6].forEach(rank=>{
+    const chosen=rank===selected.rank;
+    s+=circle(cx,cy,Math.SQRT2*rank/7*scale,'none','stroke="'+(chosen?'var(--purple)':'var(--line)')+'" stroke-width="'+(chosen?1.1:1)+'" stroke-dasharray="'+(chosen?'2 3':'2 6')+'" opacity="'+(chosen?(.3+.55*convert):.85)+'"');
+  });
+  s+=circle(cx,cy,Math.SQRT2*selected.target*scale,'var(--purple)','opacity="'+(.035*convert)+'"');
+  for(const g of geometry){
+    const i=g.id,from=realizedPoint(i,1+d.base[i]*5),to=realizedPoint(i,d.ordinal[i]);
+    const point=[from[0]+(to[0]-from[0])*state.progress,from[1]+(to[1]-from[1])*state.progress];
+    const x=cx+point[0]*scale,y=cy+point[1]*scale,chosen=i===state.candidate;
+    s+='<g data-linked-candidate="'+i+'" data-latent="'+i+'" data-candidate="'+i+'" role="button" tabindex="0" aria-label="Trace future '+CANDIDATES[i]+'">';
+    s+=line(cx,cy,cx+to[0]*scale,cy+to[1]*scale,chosen?'var(--purple)':'var(--line)','stroke-dasharray="2 4" opacity=".65"');
+    s+=circle(cx+from[0]*scale,cy+from[1]*scale,4,'none','stroke="var(--blue)" opacity=".75"');
+    s+=circle(cx+to[0]*scale,cy+to[1]*scale,6.5,'none','stroke="var(--purple)" opacity="'+(.25+.5*convert)+'"');
+    if(chosen){
+      s+=line(cx,cy,x,y,'var(--purple)','stroke-width="1.5"');
+      s+=line(cx+from[0]*scale,cy+from[1]*scale,x,y,'var(--accent)','stroke-width="3" opacity=".45"');
+      if(state.progress>0&&state.progress<1){
+        for(let tail=1;tail<=3;tail++){
+          const p=Math.max(0,state.progress-tail*.055);
+          s+=circle(cx+(from[0]+(to[0]-from[0])*p)*scale,cy+(from[1]+(to[1]-from[1])*p)*scale,4-tail*.65,'var(--purple)','opacity="'+(.4-tail*.08)+'"');
+        }
+      }
+      s+=circle(x,y,10,'var(--purple)','opacity=".14"');
+    }
+    s+=circle(x,y,chosen?5.5:3.5,chosen?'var(--accent)':'var(--blue)','stroke="var(--panel)" stroke-width="1.2" data-lift-point="'+i+'"');
+    s+=text(x+9,y+(chosen?4:-8),CANDIDATES[i],chosen?'svg-label svg-accent':'svg-small');
+    s+='</g>';
+  }
+  s+=circle(cx,cy,3.5,'var(--gold)')+text(cx-6,cy+17,'goal','svg-tiny svg-gold','text-anchor="end"');
+  s+=text(cx,297,'Same direction · radius '+fmt(selected.radius),'svg-small svg-accent','text-anchor="middle"');
+  for(let step=0;step<5;step++){
+    const x=229+step*53,last=step===4;
+    s+='<g data-future-step="'+step+'">';
+    s+=rect(x,313,47,27,last?'var(--purple-soft)':'var(--surface)',last?'var(--purple)':'var(--line)',5);
+    s+=text(x+6,330,'t'+(step+1),last?'svg-small svg-accent':'svg-small');
+    for(let j=0;j<3;j++){
+      // Teaching components: earlier cards stay fixed; only the terminal
+      // components scale along the same direction as the radial point.
+      const magnitude=last?selected.radius:(.3+.09*Math.sin(step+j));
+      s+=rect(x+22+j*7,319,4,14,last?'var(--purple)':'var(--blue)','none',1,'opacity="'+(.16+.7*magnitude)+'"');
+    }
+    s+='</g>';
+  }
+  s+=text(cx,354,'t1–t4 retained · only t5 changes','svg-tiny','text-anchor="middle"');
+
+  s+=text(548,77,'Native-distance readout','svg-label');
+  d.finalOrder.forEach((id,index)=>{
+    const g=geometry[id],y=109+index*28,chosen=id===state.candidate,win=id===nearest;
+    const scan=Math.max(0,1-Math.abs(read*6-index-.5)*2)*(read>0&&read<1?1:0);
+    s+='<g data-linked-candidate="'+id+'" data-native-row="'+id+'">';
+    s+=rect(541,y-16,202,26,win?'var(--purple-soft)':'var(--surface)',win?'var(--purple)':'none',6);
+    if(scan>0)s+=rect(541,y-16,202,26,'var(--purple)','none',6,'opacity="'+(.1*scan)+'"');
+    s+=text(550,y+1,CANDIDATES[id],chosen?'svg-small svg-accent':'svg-small');
+    s+=rect(569,y-8,112,7,'var(--line)','none',3);
+    s+=rect(569,y-8,112*g.cost,7,win?'var(--accent)':'var(--blue)','none',3,'data-native-bar="'+id+'"');
+    s+=text(733,y+1,fmt(g.cost),'svg-mono','text-anchor="end" data-native-cost="'+id+'"');
+    s+='</g>';
+  });
+  s+=rect(541,274,202,35,'var(--purple-soft)','var(--line)',8);
+  s+=text(552,296,'Nearest future','svg-small');
+  s+=text(728,297,CANDIDATES[nearest],'svg-title svg-accent','text-anchor="end" data-native-choice="true"');
+  s+=text(548,329,'ρ² = '+fmt(selected.cost),'svg-mono svg-accent','data-lift-readout="2"');
+  s+=text(548,351,read>=1?'Native order matches aligned order.':'Read the updated goal distances.','svg-tiny');
+  return s;
+}
+function diagnosticDetail() {
+  let s='';
+  ['One decision context','Zoom into the shortlist','Observe the ranking gap'].forEach((label,i)=>{
+    const x=16+i*247;
+    s+='<g data-problem-step="'+i+'" role="button" tabindex="0" aria-label="'+label+'">';
+    s+=rect(x,5,235,36,'var(--surface)','var(--line)',8,'data-problem-operation="'+i+'"');
+    s+=text(x+12,28,String(i+1),'svg-small svg-accent')+text(x+29,28,label,'svg-small')+'</g>';
+  });
+  s+=text(20,68,'Same observation + goal','svg-label');
+  if(record){
+    s+='<g id="problem-preview">'+sceneMarkup(record,previewCandidate,20,88,174,'problem')+'</g>';
+    s+=text(20,281,'Candidate '+record.candidates[previewCandidate].id+' · early recorded motion','svg-tiny');
+    s+='<text x="20" y="297" class="svg-tiny" id="problem-time">0.00 / 0.80 s preview</text>';
+  }else s+=text(20,165,'Recorded preview unavailable','svg-small');
+  s+=path('M202 175H222','detail-line');
+  s+=text(238,68,'All 63 candidates','svg-label');
+  for(let i=0;i<63;i++){
+    s+=rect(239+(i%9)*17,89+Math.floor(i/9)*17,12,12,i<4?'var(--gold)':'var(--blue)','none',3,'data-pool-tile="'+i+'"');
+  }
+  s+=text(239,221,'Predicted-distance order →','svg-tiny');
+  s+='<path id="problem-zoom" d="M239 82H302V106 M246 111L248 235 M294 111L378 235" fill="none" stroke="var(--gold)" stroke-width="1.3" stroke-dasharray="3 4"/>';
+  s+='<g id="problem-shortlist">';
+  for(let i=0;i<4;i++){
+    s+=rect(239+i*38,240,30,30,'var(--gold-fill)','var(--gold)',7);
+    s+=text(254+i*38,259,String(i+1),'svg-small svg-gold','text-anchor="middle"');
+  }
+  s+=text(239,290,'Top four · closest to selection','svg-tiny')+'</g>';
+  s+=line(411,60,411,297);
+  s+=text(433,68,'Within-start rank correlation','svg-label');
+  s+=text(505,101,'All 63','svg-small','text-anchor="middle"');
+  s+=text(701,101,'Top 4','svg-small svg-gold','text-anchor="middle"');
+  DIAGNOSTIC.forEach((row,i)=>{
+    const y=142+i*88;
+    s+=text(433,y-17,row.model,'svg-small');
+    s+=line(505,y,701,y,'var(--line)','stroke-width="2"');
+    s+=circle(505,y,24,'var(--surface)','stroke="var(--blue)"');
+    s+=text(505,y+5,row.all.toFixed(2),'svg-title','text-anchor="middle"');
+    s+='<g data-gap-reveal="'+i+'">';
+    s+=circle(701,y,24,'var(--gold-fill)','stroke="var(--gold)"');
+    s+=text(701,y+5,row.shortlist.toFixed(2),'svg-title svg-gold','text-anchor="middle"')+'</g>';
+    s+='<circle data-gap-pulse="'+i+'" cx="532" cy="'+y+'" r="3" fill="var(--gold)"/>';
+  });
+  s+=text(433,287,'96 starts · same scores and outcome labels','svg-tiny');
+  s+=rect(16,316,726,33,'var(--purple-soft)','none',9);
+  s+='<text id="problem-takeaway" x="379" y="337" class="svg-label svg-accent" text-anchor="middle"></text>';
+  return s;
+}
+function updateDiagnostic(svg) {
+  const phase=problemPhase(phaseProgress);
+  if(record)updateScenes(svg.querySelector('#problem-preview'),record,phase.motion);
+  const time=svg.querySelector('#problem-time');
+  if(time)time.textContent=(phase.motion*2.5).toFixed(2)+' / 0.80 s preview';
+  svg.querySelectorAll('[data-problem-operation]').forEach(n=>{
+    const active=Number(n.dataset.problemOperation)===phase.step;
+    n.setAttribute('fill',active?'var(--purple-soft)':'var(--surface)');
+    n.setAttribute('stroke',active?'var(--purple)':'var(--line)');
+  });
+  svg.querySelectorAll('[data-pool-tile]').forEach(n=>n.setAttribute('opacity',Number(n.dataset.poolTile)<4?1:1-.88*phase.focus));
+  for(const id of ['problem-zoom','problem-shortlist'])svg.querySelector('#'+id).style.opacity=String(.12+.88*phase.focus);
+  svg.querySelectorAll('[data-gap-reveal]').forEach(n=>n.style.opacity=String(phase.reveal));
+  svg.querySelectorAll('[data-gap-pulse]').forEach(n=>{
+    n.setAttribute('cx',532+141*phase.reveal);
+    n.style.opacity=String(phase.reveal>0&&phase.reveal<1?1:0);
+  });
+  svg.querySelector('#problem-takeaway').textContent=[
+    'A plausible predicted future does not guarantee the best action.',
+    'The planner acts on a few close alternatives—not the average candidate.',
+    'Globally informative geometry can lose its order at the decision boundary.',
+  ][phase.step];
+}
+
+
+function problemDetail() {
+  if(!pair||!record)return diagnosticDetail();
+  let s='';
+  ['Compare latent distances','Execute both candidates','Connect to the diagnosis'].forEach((label,i)=>{
+    const x=16+i*247;
+    s+='<g data-problem-step="'+i+'" role="button" tabindex="0" aria-label="'+label+'">';
+    s+=rect(x,5,235,36,'var(--surface)','var(--line)',8,'data-pair-operation="'+i+'"');
+    s+=text(x+12,28,String(i+1),'svg-small svg-accent')+text(x+29,28,label,'svg-small')+'</g>';
+  });
+  s+='<g id="pair-geometry">';
+  s+=text(20,65,'LeWM · predicted future geometry','svg-label');
+  s+=text(20,82,'Nearby goal distances, before execution','svg-tiny');
+  s+='<g id="pair-orbit">'+latentMarkup(pair,pairYaw)+'</g>';
+  s+='<rect id="pair-orbit-hit" x="18" y="91" width="333" height="176" rx="12" fill="transparent" role="slider" tabindex="0" aria-label="Rotate latent-space view" aria-valuemin="-70" aria-valuemax="70" aria-valuenow="0"/>';
+  pair.candidates.forEach((c,i)=>{
+    const x=18+i*171,color=i===0?'var(--pair-a)':'var(--pair-b)';
+    s+=rect(x,273,163,34,'var(--surface)','var(--line)',8);
+    s+=circle(x+13,290,3,color);
+    s+=text(x+24,294,c.label+' · distance '+c.rms_distance.toFixed(4),'svg-small');
+  });
+  s+='</g><g id="pair-diagnostic" opacity="0">';
+  s+=text(20,70,'The same issue at population scale','svg-label');
+  s+=text(20,89,'96 starts · within-start Spearman correlation','svg-tiny');
+  s+=text(142,120,'All 63','svg-small','text-anchor="middle"');
+  s+=text(285,120,'Top 4','svg-small svg-gold','text-anchor="middle"');
+  DIAGNOSTIC.forEach((row,i)=>{
+    const y=161+i*81;
+    s+=text(23,y+4,row.model,'svg-small')+line(159,y,268,y);
+    for(const [x,value,color] of [[142,row.all,'var(--blue)'],[285,row.shortlist,'var(--gold)']]){
+      s+=circle(x,y,16,'var(--surface)','stroke="'+color+'"');
+      s+=text(x,y+4,value.toFixed(2),'svg-label','text-anchor="middle"');
+    }
+  });
+  s+=text(23,290,'Strong global order → weak decision-local order','svg-small');
+  s+='</g>'+line(363,57,363,308);
+  s+=text(387,65,'Same start + goal · recorded execution','svg-label');
+  pair.candidates.forEach((c,i)=>{
+    const x=386+i*185,idx=record.candidates.findIndex(r=>r.id===c.id),color=i===0?'var(--pair-a)':'var(--pair-b)';
+    s+=circle(x+5,86,3,color)+text(x+14,90,'Candidate '+c.label+' · ID '+c.id,'svg-small');
+    s+=sceneMarkup(record,idx,x,102,171,'pair');
+    s+=text(x+85,288,'Cost '+c.cost.toFixed(5)+' · rank '+c.rank,'svg-small','text-anchor="middle"');
+    s+='<g data-pair-outcome="'+i+'" opacity="0">';
+    s+=circle(x+40,303,3,c.success?'#8EAD7D':'#C96E66');
+    s+=text(x+50,307,c.success?'Goal reached':'Goal not reached','svg-small')+'</g>';
+  });
+  s+=rect(16,321,726,30,'var(--purple-soft)','none',8);
+  s+='<text id="pair-takeaway" x="379" y="341" class="svg-label svg-accent" text-anchor="middle"></text>';
+  return s;
+}
+function updateProblem(svg) {
+  if(!pair||!record){updateDiagnostic(svg);return;}
+  const pairProgress=pairTimelinePhase(state.elapsed);
+  const phase=pairPhase(pairProgress);
+  const intro=latentIntro(pairProgress);
+  if(phase.diagnostic<1)svg.querySelector('#pair-orbit').innerHTML=latentMarkup(pair,pairYaw+(reducedMotion.matches?0:intro.yawOffset),intro.t,!reducedMotion.matches);
+  updateScenes(svg,record,phase.motion);
+  svg.querySelectorAll('[data-pair-operation]').forEach(n=>{
+    const active=Number(n.dataset.pairOperation)===phase.step;
+    n.setAttribute('fill',active?'var(--purple-soft)':'var(--surface)');
+    n.setAttribute('stroke',active?'var(--purple)':'var(--line)');
+  });
+  svg.querySelector('#pair-geometry').style.opacity=String(1-phase.diagnostic);
+  svg.querySelector('#pair-geometry').style.pointerEvents=phase.diagnostic>.5?'none':'';
+  svg.querySelector('#pair-diagnostic').style.opacity=String(phase.diagnostic);
+  $('#data-badge').textContent=phase.diagnostic>.5?'MEASURED DIAGNOSTIC':'RECORDED PAIR + RADIAL VIEW';
+  const hit=svg.querySelector('#pair-orbit-hit');
+  hit.setAttribute('tabindex',phase.diagnostic>.5?'-1':'0');
+  hit.setAttribute('aria-valuenow',Math.round(pairYaw*180/Math.PI));
+  hit.setAttribute('aria-valuetext',Math.round(pairYaw*180/Math.PI)+' degrees');
+  svg.querySelectorAll('[data-pair-outcome]').forEach(n=>n.style.opacity=String(phase.outcome));
+  svg.querySelector('#pair-takeaway').textContent=phase.diagnostic>.5
+    ?'Global prediction quality does not settle the local action choice.'
+    :phase.outcome>.5?'The closer predicted future fails. The slightly farther one succeeds.'
+    :phase.motion>0?'Same initial state. Two stored action sequences. Different physical futures.'
+    :'Similar goal distances do not guarantee similar physical outcomes.';
+}
+function rotatePair(yaw) {
+  pairYaw=Math.max(-1.22,Math.min(1.22,yaw));
+  const orbit=$('#pair-orbit');if(orbit)orbit.innerHTML=latentMarkup(pair,pairYaw);
+  const slider=$('#pair-view-angle');if(slider)slider.value=pairYaw;
+  updateAnimation();
+}
+
+function recordedDetail() {
+  if (!record) return text(380,170,'Loading recorded trajectories…','svg-label','text-anchor="middle"');
+  let s='';
+  record.candidates.forEach((candidate,i)=>{
+    const x=20+i*248, size=224, selected=i===state.recordCandidate;
+    s+='<g data-record-panel="'+i+'">';
+    s+=text(x+112,24,candidate.method,selected?'svg-title svg-accent':'svg-title','text-anchor="middle"');
+    s+=sceneMarkup(record,i,x,43,size,'stage'+state.stage);
+    s+=rect(x,43,size,size,'none',selected?'var(--purple)':'var(--line)',10,'stroke-width="'+(selected?2:1)+'"');
+    s+=text(x+10,288,'Candidate '+candidate.id,'svg-small');
+    s+=text(x+size-10,288,'25 actions','svg-tiny','text-anchor="end"');
+    s+='<g data-outcome="'+i+'" opacity="0">';
+    s+=circle(x+12,315,3,candidate.success?'#8EAD7D':'#C96E66');
+    s+=text(x+24,319,candidate.success?'Goal reached':'Goal not reached',candidate.success?'svg-small svg-accent':'svg-small');
+    s+='</g>';
+    s+='<rect class="record-hit" data-record-candidate="'+i+'" role="button" tabindex="0" aria-label="Inspect '+candidate.method+' candidate '+candidate.id+'" x="'+x+'" y="43" width="'+size+'" height="'+size+'" rx="10" fill="transparent"/>';
+    s+='</g>';
+  });
+  s+=text(380,351,'Same start and goal · recorded physical trajectories · 0.00–2.50 s','svg-small','text-anchor="middle" data-record-caption="true"');
+  return s;
+}
+
+function validationDetail() {
+  let s='<g id="validation-pusht-frame" opacity="0">';
+  s+=rect(16,49,236,136,'var(--surface)','var(--line)',10);
+  s+=text(28,67,'PushT','svg-label')+text(240,67,'Latent control','svg-tiny','text-anchor="end"');
+  s+='</g><g id="validation-origin">'+recordedDetail()+'</g>';
+  s+='<g id="validation-heading" opacity="0">';
+  s+=text(20,24,'One principle. Across tasks, embodiments, and dynamics.','svg-title');
+  s+='</g>';
+  VALIDATION_TASKS.forEach((task,i)=>{
+    const slot=i+1,x=16+(slot%3)*246,y=49+Math.floor(slot/3)*153;
+    s+='<g data-validation-card="'+i+'" opacity="0" style="pointer-events:none">';
+    s+=rect(x,y,236,136,'var(--surface)','var(--line)',10);
+    s+=text(x+12,y+18,task.title,'svg-label');
+    s+='<foreignObject x="'+(x+6)+'" y="'+(y+25)+'" width="224" height="89"><div xmlns="http://www.w3.org/1999/xhtml" class="validation-media">';
+    s+='<video data-validation-video="'+i+'" data-src="static/videos/explainer-wall/'+task.id+'.mp4" muted="" playsinline="" preload="none" poster="static/videos/explainer-wall/'+task.id+'.jpg" aria-label="'+task.detail+'"></video></div></foreignObject>';
+    s+=text(x+12,y+125,task.id==='driving'?'Context + compared trajectories':'Baseline left · D-JEPA right','svg-tiny');
+    s+=text(x+224,y+125,'Open ↗','svg-tiny svg-accent','text-anchor="end"');
+    s+='<rect data-validation-open="'+i+'" class="validation-hit" x="'+x+'" y="'+y+'" width="236" height="136" rx="10" fill="transparent" role="button" tabindex="-1" aria-label="Open full '+task.title+' video"/>';
+    s+='</g>';
+  });
+  return s;
+}
+function updateValidation(svg) {
+  const f=validationFrame(state.elapsed),wall=f.shrink>0;
+  svg.querySelector('#validation-origin').setAttribute('transform','translate('+(20*f.shrink)+' '+(70*f.shrink)+') scale('+(1-.7*f.shrink)+')');
+  for(const id of ['validation-heading','validation-pusht-frame'])svg.querySelector('#'+id).style.opacity=String(smooth((state.elapsed-9.6)/.5));
+  svg.querySelectorAll('[data-validation-card]').forEach(n=>{
+    const i=Number(n.dataset.validationCard),p=f.tasks[i].reveal;
+    n.style.opacity=String(p);n.style.pointerEvents=p>.95?'auto':'none';
+    n.setAttribute('transform','translate(0 '+(22*(1-p))+') scale(1)');
+    n.querySelector('[data-validation-open]').setAttribute('tabindex',p>.95?'0':'-1');
+  });
+  if($('#diagram-viewport').classList.contains('validation-expanded')!==wall)updateViewport();
+  svg.dataset.playbackSpeed=narration?.active?Math.max(.0625,narrationMotion.rate):state.speed;
+  syncValidationVideos(svg,state.elapsed,state.playing||(narration?.active&&narrationMotion.running&&narrationMotion.rate>0));
+  $('#focus-label').textContent=wall?'From one decision to cross-task validation':'PushT · synchronized physical replay';
+  $('#data-badge').textContent=wall?'RECORDED EXECUTION EXCERPTS':'RECORDED EXECUTION';
+  $('#detail-title').textContent=wall?'One principle. Different physical systems.':'The choice changes the outcome.';
+  $('#detail-description').textContent=wall
+    ?'The same decision-alignment principle is evaluated across articulated control, deformable manipulation, robotic grasping, driving and geometric changes. The PushT comparison stays in view as the other task windows unfold.'
+    :'These are the original action selections from TD-JEPA, LeWM and D-JEPA. Play them together to see how the selected action changes the physical future.';
+  $('#candidate-controls').style.visibility=wall?'hidden':'';
+  $('#detail-formula').textContent=wall?'Decision alignment → task-specific action selection':chapterCopy().formula;
+  $('#detail-fact').textContent=wall?'The windows reuse the project’s published matched comparisons with their own tasks, models and protocols. They illustrate the shared principle across separately evaluated settings. The wall shows excerpts; each window opens its full published comparison.':chapterCopy().fact;
+  $('#visual-caption').textContent=wall
+    ?'Recorded excerpts from the existing comparisons. Select any task to watch its full published video.'
+    :'Recorded simulator states. After the complete PushT replay, the view expands to other evaluated tasks.';
+}
+function openValidationVideo(index) {
+  stop();
+  const task=VALIDATION_TASKS[index],dialog=$('#validation-dialog'),video=$('#validation-full-video');
+  $('#validation-video-title').textContent=task.title;
+  $('#validation-video-detail').textContent=task.detail;
+  video.src='static/videos/'+task.id+'.mp4';video.poster='static/images/poster-'+task.id+'.jpg';
+  $('#validation-video-link').href=video.src;
+  dialog.showModal();video.play().catch(()=>{});
+}
+
+function schematicScenes() {
+  let s=text(28,23,'One observation and goal → six alternative action sequences','svg-label');
+  for(let i=0;i<6;i++){
+    const x=28+(i%3)*243,y=42+Math.floor(i/3)*152;
+    const cell=rect(x,y,218,133,'var(--scene-bg)',i===state.candidate?'var(--purple)':'var(--line)',10)
+      +tShape(x+143,y+60,0,.8,'#95EE95',.75)
+      +'<g data-toy-object="'+i+'"></g><circle data-toy-pusher="'+i+'" r="5" fill="#4A75E8"/>'
+      +tokenMark(i,x+17,y+17,i===state.candidate,10);
+    s+=candidateHit(i,x,y,218,133,cell);
+  }
+  s+=text(380,354,'Schematic trajectories for the six-candidate computation below.','svg-small','text-anchor="middle"');
+  return s;
+}
+function movingDecision() {
+  const data=example(state);
+  let s=text(35,25,'Original order','svg-label svg-gold')+text(263,25,'Bounded correction','svg-label')+text(553,25,'Aligned order','svg-label svg-accent');
+  const initial=[...CANDIDATES.keys()].sort((a,b)=>data.base[a]-data.base[b]);
+  initial.forEach((id,rank)=>{
+    const y=61+rank*39;
+    s+=tokenMark(id,49,y,id===state.candidate,10);
+    s+=rect(70,y-6,Math.max(3,data.base[id]*90),12,id===data.baseWinner?'var(--gold)':'var(--blue)','none',3);
+    s+=text(199,y+4,fmt(data.base[id]),'svg-mono','text-anchor="end"');
+    s+='<path data-rank-path="'+id+'" data-linked-candidate="'+id+'" class="detail-line"/>';
+    s+='<g data-score-row="'+id+'" data-linked-candidate="'+id+'">';
+    s+=rect(544,-17,184,33,id===data.winner?'var(--purple-soft)':'var(--surface)','none',7);
+    s+=tokenMark(id,561,0,id===state.candidate,10);
+    s+='<rect data-aligned-bar="'+id+'" x="581" y="-6" width="4" height="12" rx="3" fill="'+(id===data.winner?'var(--purple)':'var(--blue)')+'"/>';
+    s+='<text data-aligned-value="'+id+'" x="715" y="4" class="svg-mono" text-anchor="end"></text></g>';
+    s+=rect(321,y-12,88,24,'var(--panel)','none',6);
+    s+=text(365,y+4,(data.delta[id]>0?'+':'')+fmt(data.delta[id]),'svg-mono svg-accent','text-anchor="middle"');
+  });
+  s+=rect(26,314,707,35,'var(--surface)','var(--line)',8);
+  s+='<text id="gate-message" x="380" y="336" class="svg-mono" text-anchor="middle"></text>';
+  return s;
+}
+function contextStrip() {
+  const labels=['Decision-local prediction gap','Future–goal evidence','Candidate relations','Aligned order','Representation lifting','Native-distance selection'];
+  const current=labels[state.stage],before=labels[state.stage-1]||'Observation + goal',after=state.stage===4?(state.lifting==='ordinal'?'Native-distance planning':'Representation diagnostic'):(labels[state.stage+1]||'Environment');
+  $('#architecture').innerHTML=text(12,26,before,'svg-small')+path('M174 22H240','detail-line')
+    +rect(250,5,264,33,'var(--purple-soft)','none',16)
+    +text(382,26,current,'svg-label svg-accent','text-anchor="middle"')
+    +path('M524 22H581','detail-line')+text(744,26,after,'svg-small','text-anchor="end"');
+}
+function isRecorded(){return state.stage===5&&state.replay;}
+function updateViewport(){
+  const compact=matchMedia('(max-width:900px)').matches;
+  const expanded=isRecorded()&&state.elapsed>8;
+  $('#diagram-viewport').classList.toggle('validation-expanded',expanded);
+  $('#diagram-viewport').classList.toggle('recorded',isRecorded()&&!expanded);
+  $('#detail-visual').setAttribute('viewBox',compact&&isRecorded()&&!expanded?(14+state.recordCandidate*248)+' 8 236 350':'0 0 760 360');
+  $$('[data-record-panel]').forEach(n=>n.style.display=compact&&!expanded&&Number(n.dataset.recordPanel)!==state.recordCandidate?'none':'');
+  const caption=$('[data-record-caption]');if(caption)caption.style.display=compact&&!expanded?'none':'';
+}
+function chapterCopy() {
+  const chapter={...chapters[state.stage]};
+  if(state.stage===0){
+    Object.assign(chapter,{
+      kicker:'01 / THE OBSERVED PROBLEM', title:'Good global ranking. Weak local decisions.',
+      description:'Predictive geometry can organize a broad set of futures well, yet misorder the close alternatives that determine the next action. Zoom from the full candidate pool to the planner’s shortlist to see the gap.',
+      formula:'Global predictive order ≠ decision-local order',
+      fact:'Average within-start Spearman correlation on 96 matched PushT starts: LeWM 0.90 → 0.11; TD-JEPA 0.80 → 0.13, from all 63 candidates to the top four. Values are rounded as on the project page. The preview illustrates one recorded start; the statistics summarize the diagnostic cohort.',
+      visual:'The problem · global order versus decision-local order',
+      caption:'Measured correlations; schematic pool tiles. Early recorded motion supplies context; complete executions appear in 06.',
+    });
+  }
+  if(state.stage===0&&pair){
+    Object.assign(chapter,{
+      title:'Close in latent distance. Different in execution.',
+      description:'Two futures from the same LeWM space sit at nearby goal distances. The lower-distance candidate fails; the slightly farther one succeeds. Rotate the geometry, play both recorded actions, then connect the example to the measured ranking gap.',
+      formula:'A: 0.2027  <  B: 0.2167  · RMS distance',
+      fact:'Start 176; candidate A = 79 (rank 1), B = 23 (rank 3) in the same 63-candidate pool. Native MSE costs are 0.04107749 and 0.04695161; radial lengths are their square roots. The opening angle comes from stored float16 latent directions. The purple point cloud, its local links and ground grid are illustrative spatial context, not measured embeddings or learned clusters. A/B distances and recorded outcomes stay fixed as the camera rotates.',
+      visual:'Nearby latent distances → different physical outcomes',
+      caption:'Measured distances, recorded executions. Rotate the radial view; 3D orientation is illustrative. Aggregate evidence follows.',
+    });
+  }
+  if(isRecorded()){
+    chapter.kicker=state.stage===0?'01 / POSSIBLE ACTIONS':'06 / RECORDED EXECUTION';
+    chapter.title=state.stage===0?'One start. Three different futures.':'The choice changes the outcome.';
+    chapter.description=state.stage===0
+      ?'Watch three stored action sequences unfold from the same PushT state. The pusher moves, makes contact and rotates the object toward the green goal.'
+      :'These are the original action selections from TD-JEPA, LeWM and D-JEPA. Play them together to see how the selected action changes the physical future.';
+    chapter.formula='Same observation + goal → different actions';
+    chapter.fact='Start 176. Three method-selected candidates from the original pool; full 25-control-action sequences over 2.50 seconds. Their recorded states drive the animation.';
+    chapter.visual='PushT · synchronized physical replay';
+    chapter.caption='Recorded simulator states. The internal computation stages use a separate, labelled six-candidate teaching example.';
+    if(record){
+      const candidate=record.candidates[state.recordCandidate];
+      chapter.formula='Candidate '+candidate.id+' · '+candidate.method;
+      chapter.fact+=' Full-pool ranks for this candidate: LeWM '+candidate.ranks[0]+', TD-JEPA '+candidate.ranks[1]+', D-JEPA '+candidate.ranks[2]+'.';
+    }
+  } else if(state.stage===5){
+    chapter.visual='Six schematic candidate trajectories';
+    chapter.caption='Illustrative motion for the teaching example; switch to recorded PushT to view actual executions.';
+  }
+  if(state.stage===1){
+    chapter.description='Subtract each model’s goal representation from its predicted future, then normalize the descriptor. Sort candidate costs within each source and convert rank to a shared ordinal scale. Concatenate these signals and encode each candidate token.';
+    chapter.caption='Click the three operations or scrub their progress. Blue/purple: source descriptors; peach: negative components; gold: ordinal evidence.';
+    chapter.fact='Descriptors are LayerNorm-normalized future–goal differences. Displayed vectors use the actual subtraction and normalization on synthetic values; costs and ranks are deterministic teaching data. Four sources add JEPA-WM and DINO-WM ranks while retaining the two 192D descriptors.';
+  }
+  if(state.stage===1&&state.sources===4){
+    chapter.formula='vᵢ = [dᵢᴸ ; dᵢᵀ ; rᵢᴸ ; rᵢᵀ ; rᵢᴶ ; rᵢᴰ]';
+    chapter.fact='388-dimensional tokens. The four-geometry configuration has separately learned parameters and a JEPA-WM base.';
+  }
+  if(state.stage===2){
+    chapter.description='Compare a candidate with the complete set, watch weighted messages gather its context, then follow the shared low-rank head into a bounded correction. Select a matrix row or Trace candidate; change the attention head to inspect a different pattern.';
+    chapter.fact='Two Transformer layers, four attention heads and a shared rank-eight correction head. The diagram isolates one illustrative attention head and computes its weighted sum over eight displayed value components. Attention values and the bounded head output are teaching examples, not checkpoint activations; the head output is illustrated separately from this one-head sum.';
+    chapter.caption='Schematic attention and correction outputs illustrate distinct operations; they are not recorded checkpoint activations.';
+  }
+  if(state.stage===3){
+    chapter.description='The bounded update changes the closest alternatives. Watch the ranking reorder, then inspect whether the margin gate admits the relational winner.';
+    chapter.caption='Drag the step progress to see score correction and reordering. Gold: base choice. Purple: aligned choice.';
+  }
+  if(state.stage===4&&state.lifting==='ordinal'){
+    chapter.title='Turn the learned rank into a future latent.';
+    chapter.description='Read the aligned rank, set its target radius, then move the terminal future along its original direction. The first four steps stay fixed. Watch the native-distance bars change and recover the same aligned order.';
+    chapter.visual='Representation lifting · between aligned ranks and native-distance planning';
+    chapter.caption='Follow a candidate: rank → radius → terminal latent → native distance. Click a numbered operation to play its transformation.';
+  }
+  if(state.stage===4&&state.lifting==='transport'){
+    chapter.title='Refine the future, step by step.';
+    chapter.description='A time-conditioned network learns a bounded displacement between corresponding predictive futures. Action identity and future-step identity stay fixed.';
+    chapter.formula='z̃ᵀᵢ,ₜ = ẑᵀᵢ,ₜ + βᵢ,ₜ · uᵢ,ₜ';
+    chapter.fact='Reacher: five future steps, a 5 → 32 → 1 coefficient network and a 0.1 bound. Physical decisions use relational selection; transported latents are representation diagnostics.';
+    chapter.visual='Bounded temporal transport · five future steps';
+    chapter.caption='Schematic representation diagnostic. Blue: original future. Purple: transported future.';
+  }
+  return chapter;
+}
+function options() {
+  const panel=$('#stage-options');
+  panel.innerHTML='';
+  if(state.stage===0&&pair){
+    panel.innerHTML='<label class="lifting-control"><span>Rotate latent view <span>Drag space / ← →</span></span><input id="pair-view-angle" type="range" min="-1.22" max="1.22" step=".01" value="'+pairYaw+'" aria-label="Latent view angle"></label>';
+    $('#pair-view-angle').oninput=e=>{stop();if(phaseProgress>.8)state.elapsed=.15*stageSeconds[0];rotatePair(Number(e.target.value));};
+  }
+  if(state.stage===5){
+    panel.innerHTML='<div class="segmented" role="group" aria-label="Scene source"><button data-replay="true" aria-pressed="'+state.replay+'">Recorded PushT</button><button data-replay="false" aria-pressed="'+!state.replay+'">Teaching example</button></div>';
+  }
+  if(state.stage===2){
+    panel.innerHTML='<label>Attention head <select id="attention-head">'+[0,1,2,3].map(h=>'<option value="'+h+'" '+(h===state.head?'selected':'')+'>'+ (h+1)+' / 4</option>').join('')+'</select></label>';
+    $('#attention-head').onchange=e=>{state.head=Number(e.target.value);renderDiagram();};
+  }
+  if(state.stage===3){
+    panel.innerHTML='<details><summary>Complementary predictor adaptation +</summary><p>The final TD-JEPA predictor block and projection can supply a native-distance proposal. Calibrated composition combines it with the relational default.</p></details>';
+  }
+  if(state.stage===4){
+    panel.innerHTML='<div class="segmented" role="group" aria-label="Representation mechanism"><button data-lifting="ordinal" aria-pressed="'+(state.lifting==='ordinal')+'">Ordinal realization</button><button data-lifting="transport" aria-pressed="'+(state.lifting==='transport')+'">Temporal transport</button></div>';
+  }
+  if(state.stage===5&&state.replay)panel.insertAdjacentHTML('beforeend','<button data-validation-jump="0">Replay PushT</button><button data-validation-jump="12.4">Explore all tasks ↗</button>');
+  const localLabel=isRecorded()?'Scene progress':state.stage===4?'Transformation':'Step progress';
+  panel.insertAdjacentHTML('beforeend','<label class="lifting-control"><span>'+localLabel+' <output id="step-value" for="step-progress">0%</output></span><input id="step-progress" type="range" min="0" max="1" step=".005" value="0" aria-label="Current step progress"></label><button id="replay-step" class="quiet-button">Replay this step ↻</button>');
+  $('#step-progress').oninput=e=>{stop();state.elapsed=Number(e.target.value)*stageSeconds[state.stage];updateAnimation();};
+  $('#replay-step').onclick=()=>{stop();state.elapsed=0;play(true);};
+  if(state.stage===3||state.stage===4){
+    panel.insertAdjacentHTML('beforeend','<button id="compare-before" class="compare-button" aria-pressed="false">Hold to see before alignment</button>');
+    const compare=$('#compare-before');
+    compare.onpointerdown=e=>{if(e.button!==0)return;e.preventDefault();compare.setPointerCapture(e.pointerId);compareBefore(true);};
+    compare.onpointerup=()=>compareBefore(false);
+    compare.onpointercancel=()=>compareBefore(false);
+    compare.onlostpointercapture=()=>compareBefore(false);
+    compare.onkeydown=e=>{if((e.code==='Space'||e.key==='Enter')&&!e.repeat){e.preventDefault();compareBefore(true);}};
+    compare.onkeyup=e=>{if(e.code==='Space'||e.key==='Enter'){e.preventDefault();compareBefore(false);}};
+    compare.onblur=()=>compareBefore(false);
+  }
+}
+function compareBefore(active){
+  if(state.comparing===active)return;
+  if(active){resumeAfterCompare=state.playing;stop();}
+  state.comparing=active;
+  const button=$('#compare-before');
+  if(button){button.setAttribute('aria-pressed',String(active));button.textContent=active?'Before alignment · release to return':'Hold to see before alignment';}
+  updateAnimation();
+  if(!active&&resumeAfterCompare){resumeAfterCompare=false;play();}
+}
+function applyLinkedFocus(){
+  const id=state.hoverCandidate;
+  $$('#detail-visual [data-linked-candidate], #detail-visual [data-token]').forEach(n=>{
+    const value=Number(n.dataset.linkedCandidate??n.dataset.token);
+    n.classList.toggle('trace-muted',id!==null&&value!==id);
+    n.classList.toggle('trace-focused',id!==null&&value===id);
+  });
+  $$('#detail-visual .matrix-cell').forEach(n=>{
+    n.classList.toggle('trace-muted',id!==null&&Number(n.dataset.row)!==id&&Number(n.dataset.col)!==id);
+  });
+}
+function renderCandidateControls() {
+  const panel=$('#candidate-controls');
+  const context=state.stage===0?'problem':isRecorded()?'recorded':'schematic';
+  if(context==='problem'&&pair){
+    panel.innerHTML='';
+    currentContext=context;return;
+  }
+  if(currentContext!==context){
+    panel.innerHTML=context==='problem'?'<span>Early motion</span>'+(record?record.candidates.map((c,i)=>'<button data-preview-candidate="'+i+'" aria-pressed="'+(i===previewCandidate)+'">Candidate '+c.id+'</button>').join(''):'Unavailable'):'<span>Trace</span>'+(context==='recorded'&&record
+      ?record.candidates.map((c,i)=>'<button data-record-candidate="'+i+'" aria-label="Inspect '+c.method+' candidate '+c.id+'">'+c.method+'</button>').join('')
+      :CANDIDATES.map((id,i)=>'<button data-candidate="'+i+'" aria-label="Trace candidate '+id+'">'+id+'</button>').join(''));
+    currentContext=context;
+  }
+  $$('[data-record-candidate]').filter(n=>n.tagName==='BUTTON').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.recordCandidate)===state.recordCandidate)));
+  $$('#candidate-controls [data-candidate]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.candidate)===state.candidate)));
+}
+function renderDiagram(transition=false) {
+  releaseValidationVideos($('#detail-visual'));
+  const oldTokens=new Map([...$('#detail-visual').querySelectorAll('[data-token]')].map(n=>[n.dataset.token,n.getBoundingClientRect()]));
+  let renderer=state.stage===0?problemDetail:state.stage===5?(isRecorded()?validationDetail:schematicScenes)
+    :[null,evidenceDetail,relationsDetail,movingDecision,liftingDetail][state.stage];
+  $('#detail-visual').innerHTML=renderer();
+  updateViewport();
+  if(transition&&!reducedMotion.matches){
+    $('#detail-visual').getAnimations().forEach(a=>a.cancel());
+    $('#detail-visual').animate([{opacity:.1,transform:'translateY(9px)'},{opacity:1,transform:'translateY(0)'}],{duration:420,easing:'ease-out'});
+  }
+  $('#matrix-tooltip').hidden=true;
+  updateAnimation();
+  if(transition&&!reducedMotion.matches){
+    const scale=$('#detail-visual').getScreenCTM().a;
+    const seen=new Set();
+    $$('#detail-visual [data-token]').forEach(node=>{
+      const key=node.dataset.token,from=oldTokens.get(key);if(!from||seen.has(key))return;seen.add(key);
+      const to=node.getBoundingClientRect();
+      node.animate([{transform:'translate('+((from.x-to.x)/scale)+'px,'+((from.y-to.y)/scale)+'px)'},{transform:'translate(0,0)'}],{duration:600,easing:'cubic-bezier(.2,.7,.25,1)'});
+    });
+  }
+}
+function render(transition=false) {
+  modelMap?.update(state.stage);
+  const c=chapterCopy();
+  $('#candidate-controls').style.visibility='';
+  document.documentElement.dataset.stage=state.stage;
+  $('#detail-kicker').textContent=c.kicker;$('#detail-title').textContent=c.title;
+  $('#detail-description').textContent=c.description;$('#detail-formula').textContent=c.formula;
+  $('#detail-fact').textContent=c.fact;$('#focus-label').textContent=c.visual;
+  $('#visual-caption').textContent=c.caption;
+  $('#data-badge').textContent=state.stage===0?'MEASURED DIAGNOSTIC':isRecorded()?'RECORDED EXECUTION':'ILLUSTRATIVE COMPUTATION';
+  $('#detail-visual').setAttribute('aria-label',c.visual);
+  $('#experiment-controls').hidden=isRecorded()||state.stage===0||state.stage===5||state.stage===4;
+  $('#supervision-toggle').hidden=isRecorded()||state.stage===0;
+  $('#model-note').textContent=isRecorded()?'The reconstruction follows recorded positions and angles; interpolation only smooths playback.':state.sources===2?'Two 192-dimensional descriptors and two ranks form a 386-dimensional token.':'The four-source configuration uses 388 dimensions and its own learned parameters.';
+  if(state.stage===0&&pair)$('#model-note').textContent='A curated pair from the same model and pool. Geometry uses recorded native costs and stored latent directions; physical motion covers the original 25-action, 2.50-second horizon.';
+  else if(state.stage===0)$('#model-note').textContent='The 63 tiles explain shortlist selection; they do not encode individual outcomes. The physical preview shows only the first 0.80 seconds of an existing 2.50-second recording.';
+  $$('#chapters button').forEach(b=>{
+    const i=Number(b.dataset.stage);
+    b.classList.toggle('past',i<state.stage);
+    if(i===state.stage)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current');
+  });
+  $$('[data-sources]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.sources)===state.sources)));
+  $('#previous').disabled=state.stage===0;$('#next').disabled=state.stage===5;
+  const d=example(state);
+  $('#base-choice').textContent=CANDIDATES[d.baseWinner];$('#aligned-choice').textContent=CANDIDATES[d.winner];
+  $('#strength-value').value=state.bound.toFixed(2);
+  contextStrip();options();renderCandidateControls();renderDiagram(transition);
+}
+function smooth(t){t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);}
+function physicalProgress(){return isRecorded()?validationFrame(state.elapsed).pushProgress:smooth((phaseProgress-.08)/.8);}
+function updateAnimation() {
+  phaseProgress=Math.min(1,state.elapsed/stageSeconds[state.stage]);
+  state.progress=state.comparing?0:state.stage===4?liftingProgress(phaseProgress):smooth((phaseProgress-.12)/.74);
+  const svg=$('#detail-visual');
+  if(state.stage===0){
+    updateProblem(svg);
+  } else if(isRecorded()&&record){
+    const p=physicalProgress();
+    updateScenes(svg,record,p);
+    $$('[data-outcome]').forEach(n=>n.setAttribute('opacity',p>=.999?1:0));
+    updateValidation(svg);
+  } else if(state.stage===5){
+    const p=physicalProgress(), endings=[[143,60,0],[103,89,-25],[134,69,8],[84,102,35],[168,91,60],[121,109,-50]];
+    endings.forEach(([ex,ey,a],i)=>{
+      const x=28+(i%3)*243,y=42+Math.floor(i/3)*152,move=smooth((p-.2)/.8);
+      const bx=x+85+(ex-85)*move,by=y+90+(ey-90)*move;
+      const body=svg.querySelector('[data-toy-object="'+i+'"]');
+      if(body)body.innerHTML=tShape(bx,by,-30+(a+30)*move,.8);
+      const ball=svg.querySelector('[data-toy-pusher="'+i+'"]');
+      if(ball){ball.setAttribute('cx',x+52+(bx-x-20-52)*smooth(p/.75));ball.setAttribute('cy',y+113+(by-y+20-113)*smooth(p/.75));}
+    });
+  } else if(state.stage===1){
+    updateEvidence(svg);
+  } else if(state.stage===2){
+    updateRelations(svg);
+  } else if(state.stage===3){
+    const d=example(state),initial=[...CANDIDATES.keys()].sort((a,b)=>d.base[a]-d.base[b]);
+    const p=state.comparing?0:decisionProgress(phaseProgress,d);
+    initial.forEach((id,i)=>{
+      const from=61+i*39,to=61+d.finalOrder.indexOf(id)*39,y=from+(to-from)*p;
+      const row=svg.querySelector('[data-score-row="'+id+'"]');
+      if(!row)return;
+      row.setAttribute('transform','translate(0 '+y+')');
+      const path=svg.querySelector('[data-rank-path="'+id+'"]');
+      path.setAttribute('d','M211 '+from+'C285 '+from+' 451 '+y+' 535 '+y);
+      path.style.stroke=id===state.candidate?'var(--purple)':'var(--line)';
+      path.style.strokeWidth=id===state.candidate?'2':'1';
+      svg.querySelector('[data-aligned-bar="'+id+'"]').setAttribute('width',Math.max(2,(d.base[id]+d.delta[id]*p)*80));
+      svg.querySelector('[data-aligned-value="'+id+'"]').textContent=fmt(d.base[id]+d.delta[id]*p);
+    });
+    const node=svg.querySelector('#gate-message');
+    if(node){
+      const scores=d.base.map((b,i)=>b+d.delta[i]*p);
+      const switched=d.winner!==d.baseWinner&&scores[d.winner]<scores[d.baseWinner];
+      node.textContent=state.comparing?'Before alignment · base winner '+CANDIDATES[d.baseWinner]
+        :p>=.995?'Gate: '+fmt(d.advantage)+(d.admitted?' > ':' ≤ ')+fmt(d.threshold)+' → '+(d.admitted?'admit '+CANDIDATES[d.winner]:'keep '+CANDIDATES[d.baseWinner])
+        :switched?'Boundary switch: '+CANDIDATES[d.winner]+' '+fmt(scores[d.winner])+' < '+CANDIDATES[d.baseWinner]+' '+fmt(scores[d.baseWinner])+' · inspect the two alternatives'
+        :'Base choice '+CANDIDATES[d.baseWinner]+' · apply the bounded correction';
+      node.classList.toggle('svg-accent',switched&&!state.comparing);
+    }
+    if(phaseProgress>=.30&&phaseProgress<.48&&!state.comparing){
+      svg.querySelectorAll('[data-score-row]').forEach(n=>n.classList.toggle('boundary-muted',![d.winner,d.baseWinner].includes(Number(n.dataset.scoreRow))));
+    }else svg.querySelectorAll('[data-score-row]').forEach(n=>n.classList.remove('boundary-muted'));
+  } else if(state.stage===4){
+    svg.innerHTML=liftingDetail();
+  }
+  applyLinkedFocus();
+  $('#step-progress').value=phaseProgress;
+  $$('input[type=range]').forEach(input=>input.style.setProperty('--fill',100*(Number(input.value)-Number(input.min))/(Number(input.max)-Number(input.min))+'%'));
+  $('#step-value').value=isRecorded()?(state.elapsed>8?'Cross-task view':(physicalProgress()*2.5).toFixed(2)+' s'):Math.round(phaseProgress*100)+'%';
+  const seconds=stageSeconds.slice(0,state.stage).reduce((a,b)=>a+b,0)+state.elapsed;
+  $('#tour-seek').value=seconds;
+  $('#tour-seek').style.setProperty('--fill',100*seconds/totalDuration+'%');
+  const stamp=t=>String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t)%60).padStart(2,'0');
+  $('#tour-time').value=stamp(seconds)+' / '+stamp(totalDuration);
+  $('#timeline-label').textContent=state.playing?'Playing · '+$('#chapters [aria-current]').textContent.replace('→','').trim():'Drag to explore · '+(isRecorded()?'recorded motion':'computation');
+}
+function selectStage(stage,manual=true) {
+  pauseValidationVideos();
+  if(manual)stop();
+  state.comparing=false;resumeAfterCompare=false;state.hoverCandidate=null;
+  state.stage=Math.max(0,Math.min(5,stage));state.elapsed=0;state.progress=0;
+  render(true);
+  const tab=$('#chapters [data-stage="'+state.stage+'"]');
+  tab.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});
+}
+function stop() {
+  narration?.pause();
+  queueMicrotask(()=>{if(narration?.active)narration.refreshControls();});
+  pauseValidationVideos();
+  document.querySelectorAll('[data-validation-video]').forEach(v=>v.dataset.wantsPlayback='false');
+  state.playing=false;cancelAnimationFrame(frame);document.body.classList.remove('running');
+  $('#play-symbol').textContent='▶';$('#play-label').textContent='Play tour';
+  $('#play').setAttribute('aria-label','Play guided tour');
+}
+function play(stepOnly=false,until=null) {
+  narration?.exit();
+  modelMap?.close();
+  if(state.playing){stop();return;}
+  if(state.elapsed>=stageSeconds[state.stage]){
+    if(stepOnly){state.elapsed=0;}else selectStage(state.stage===5?0:state.stage+1,false);
+  }
+  state.playing=true;previousTime=performance.now();document.body.classList.add('running');
+  $('#play-symbol').textContent='Ⅱ';$('#play-label').textContent='Pause';$('#play').setAttribute('aria-label','Pause guided tour');
+  function tick(now){
+    if(!state.playing)return;
+    state.elapsed+=Math.min(.5,(now-previousTime)/1000)*state.speed;previousTime=now;
+    if(until!==null&&state.elapsed>=until){state.elapsed=until;updateAnimation();stop();return;}
+    if(state.elapsed>=stageSeconds[state.stage]){
+      if(stepOnly||state.stage===5){state.elapsed=stageSeconds[state.stage];updateAnimation();stop();return;}
+      selectStage(state.stage+1,false);
+    }
+    updateAnimation();frame=requestAnimationFrame(tick);
+  }
+  frame=requestAnimationFrame(tick);
+}
+function seek(seconds) {
+  stop();state.comparing=false;resumeAfterCompare=false;let index=0;
+  while(index<5&&seconds>=stageSeconds[index]){seconds-=stageSeconds[index];index++;}
+  if(index!==state.stage){state.stage=index;state.elapsed=seconds;render(true);}
+  else{state.elapsed=seconds;updateAnimation();}
+}
+function setTheme(theme){
+  document.documentElement.dataset.theme=theme;$('#theme-label').textContent=theme==='dark'?'Dark':'Light';
+  $('#theme-toggle').setAttribute('aria-pressed',String(theme==='dark'));
+  $('#theme-toggle').setAttribute('aria-label','Switch to '+(theme==='dark'?'light':'dark')+' theme');
+  $('#site-icon').href='static/images/branding/jepa-icon-'+theme+'.svg';
+  try{localStorage.setItem('djepa-theme',theme);}catch(_){}
+}
+document.addEventListener('click',event=>{
+  if(narration?.active&&event.target.closest('#chapters [data-stage],[data-candidate],[data-lifting],[data-replay],[data-relation-step],[data-problem-step],[data-evidence-step],[data-lift-step],.matrix-cell')){
+    narration.pause();queueMicrotask(()=>{if(narration?.active)narration.refreshControls();});
+  }
+},true);
+document.addEventListener('click',event=>{
+  const relation=event.target.closest('[data-relation-step]');
+  if(relation){stop();const i=Number(relation.dataset.relationStep);state.elapsed=[0,.3,.72][i]*stageSeconds[2];updateAnimation();play(true,[.3,.72,1][i]*stageSeconds[2]);return;}
+  const query=event.target.closest('.matrix-cell');
+  if(query){stop();state.candidate=Number(query.dataset.row);render(false);return;}
+  const task=event.target.closest('[data-validation-open]');
+  if(task){openValidationVideo(Number(task.dataset.validationOpen));return;}
+  const jump=event.target.closest('[data-validation-jump]');
+  if(jump){stop();state.elapsed=Number(jump.dataset.validationJump);updateAnimation();return;}
+  const problemOperation=event.target.closest('[data-problem-step]');
+  if(problemOperation){
+    stop();const operation=Number(problemOperation.dataset.problemStep);
+    if(pair&&operation===0){state.elapsed=0;updateAnimation();play(true,PAIR_INTRO_SECONDS);return;}
+    state.elapsed=pair?pairTimelineSeconds([.15,.76,1][operation]):[.12,.5,1][operation]*stageSeconds[0];updateAnimation();return;
+  }
+  const preview=event.target.closest('[data-preview-candidate]');
+  if(preview){previewCandidate=Number(preview.dataset.previewCandidate);currentContext='';render(false);return;}
+  const evidenceOperation=event.target.closest('[data-evidence-step]');
+  if(evidenceOperation){stop();state.elapsed=[.20,.55,1][Number(evidenceOperation.dataset.evidenceStep)]*stageSeconds[1];updateAnimation();return;}
+  const operation=event.target.closest('[data-lift-step]');
+  if(operation){stop();const i=Number(operation.dataset.liftStep);state.elapsed=[0,.16,.34,.8][i]*stageSeconds[4];updateAnimation();play(true,[.16,.34,.8,1][i]*stageSeconds[4]);return;}
+  const milestone=event.target.closest('[data-jump-stage]');
+  if(milestone){selectStage(Number(milestone.dataset.jumpStage));state.elapsed=Number(milestone.dataset.jumpPhase)*stageSeconds[state.stage];updateAnimation();return;}
+  const stage=event.target.closest('#chapters [data-stage]');
+  if(stage){selectStage(Number(stage.dataset.stage));return;}
+  const candidate=event.target.closest('[data-candidate]');
+  if(candidate){state.candidate=Number(candidate.dataset.candidate);render(false);return;}
+  const recorded=event.target.closest('[data-record-candidate]');
+  if(recorded){state.recordCandidate=Number(recorded.dataset.recordCandidate);render(false);return;}
+  const replay=event.target.closest('[data-replay]');
+  if(replay){stop();state.replay=replay.dataset.replay==='true';state.elapsed=0;currentContext='';render(true);return;}
+  const lifting=event.target.closest('[data-lifting]');
+  if(lifting){stop();state.lifting=lifting.dataset.lifting;state.elapsed=0;render(true);return;}
+});
+
+$('#detail-visual').addEventListener('pointerdown',event=>{
+  if(!event.target.closest('#pair-orbit-hit'))return;
+  event.preventDefault();stop();
+  orbitDrag={x:event.clientX,yaw:pairYaw,pointerId:event.pointerId};
+  $('#detail-visual').setPointerCapture(event.pointerId);
+});
+$('#detail-visual').addEventListener('pointermove',event=>{
+  if(orbitDrag)rotatePair(orbitDrag.yaw+(event.clientX-orbitDrag.x)*.008);
+});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])
+  $('#detail-visual').addEventListener(name,()=>{orbitDrag=null;});
+$('#detail-visual').addEventListener('keydown',event=>{
+  if(event.target.id==='pair-orbit-hit'&&['ArrowLeft','ArrowRight'].includes(event.key)){
+    event.preventDefault();event.stopPropagation();stop();rotatePair(pairYaw+(event.key==='ArrowLeft'?-.08:.08));
+  }
+});
+function showMatrix(event){
+  const cell=event.target.closest('.matrix-cell'),tip=$('#matrix-tooltip');
+  if(!cell){tip.hidden=true;state.hoverCandidate=null;applyLinkedFocus();return;}
+  tip.hidden=false;
+  state.hoverCandidate=Number(cell.dataset.row);applyLinkedFocus();
+  tip.textContent='Candidate '+CANDIDATES[Number(cell.dataset.row)]+' ← '+CANDIDATES[Number(cell.dataset.col)]+' · illustrative attention '+Number(cell.dataset.weight).toFixed(3);
+}
+$('#detail-visual').addEventListener('pointerover',showMatrix);
+$('#detail-visual').addEventListener('pointerdown',event=>{if(event.target.closest('[data-lift-step], [data-latent], [data-evidence-step], [data-problem-step]'))stop();});
+$('#detail-visual').addEventListener('focusin',showMatrix);
+$('#detail-visual').addEventListener('pointerleave',()=>{$('#matrix-tooltip').hidden=true;state.hoverCandidate=null;applyLinkedFocus();});
+$('#candidate-controls').addEventListener('pointerover',event=>{
+  const target=event.target.closest('[data-candidate]');if(!target)return;
+  state.hoverCandidate=Number(target.dataset.candidate);applyLinkedFocus();
+});
+$('#candidate-controls').addEventListener('pointerleave',()=>{state.hoverCandidate=null;applyLinkedFocus();});
+document.addEventListener('keydown',event=>{
+  const target=event.target;
+  if((event.key==='Enter'||event.key===' ')&&target.matches('[role=button]')){event.preventDefault();target.dispatchEvent(new MouseEvent('click',{bubbles:true}));return;}
+  if(target.closest('input,select,textarea,button,a,summary,dialog'))return;
+  if(event.key==='ArrowRight'){event.preventDefault();if(narration?.active)narration.step(1);else selectStage(state.stage+1);}
+  if(event.key==='ArrowLeft'){event.preventDefault();if(narration?.active)narration.step(-1);else selectStage(state.stage-1);}
+  if(event.code==='Space'){event.preventDefault();if(narration?.active)narration.toggle();else play();}
+});
+$('#play').onclick=()=>play();
+$('#previous').onclick=()=>narration?.active?narration.step(-1):selectStage(state.stage-1);
+$('#next').onclick=()=>narration?.active?narration.step(1):selectStage(state.stage+1);
+$('#tour-seek').max=totalDuration;
+const milestones=[
+  [1,.55,'Inspect ordinal evidence'],
+  [1,.95,'Inspect candidate-token assembly'],
+  [2,.72,'Inspect candidate relations'],
+  [3,.38,'Inspect the decision boundary'],
+  [3,.94,'Read the gate decision'],
+  [4,.58,'Inspect representation lifting'],
+  [4,1,'Read native-distance selection'],
+];
+$('.timeline').insertAdjacentHTML('beforeend','<div class="timeline-markers" aria-label="Key moments">'+milestones.map(([stage,phase,label])=>{
+  const time=stageSeconds.slice(0,stage).reduce((a,b)=>a+b,0)+stageSeconds[stage]*phase;
+  return '<button type="button" data-jump-stage="'+stage+'" data-jump-phase="'+phase+'" aria-label="'+label+'" title="'+label+'" style="left:'+100*time/totalDuration+'%"><span class="sr-only">'+label+'</span></button>';
+}).join('')+'</div>');
+$('#tour-seek').oninput=e=>narration?.active?narration.seek(Number(e.target.value)):seek(Number(e.target.value));
+$('#reset').onclick=()=>{narration?.exit();stop();Object.assign(state,{stage:0,candidate:0,sources:2,bound:.2,head:0,lifting:'ordinal',progress:0,elapsed:0,recordCandidate:2,replay:true,speed:1,comparing:false,hoverCandidate:null});$('#strength').value=.2;$('#speed').value='1';render(true);};
+$('#speed').onchange=e=>{state.speed=Number(e.target.value);narration?.setRate(state.speed);};
+$('#strength').oninput=e=>{stop();state.bound=Number(e.target.value);state.elapsed=stageSeconds[state.stage];render(false);};
+$$('[data-sources]').forEach(b=>b.onclick=()=>{stop();state.sources=Number(b.dataset.sources);render(false);});
+$('#theme-toggle').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
+$('#supervision-toggle').onclick=()=>{stop();$('#supervision-panel').showModal();$('#supervision-toggle').setAttribute('aria-expanded','true');};
+$('#close-validation').onclick=()=>$('#validation-dialog').close();
+$('#validation-dialog').onclose=()=>{$('#validation-full-video').pause();$('#validation-full-video').removeAttribute('src');$('#validation-full-video').load();};
+$('#close-supervision').onclick=()=>$('#supervision-panel').close();
+$('#supervision-panel').onclose=()=>$('#supervision-toggle').setAttribute('aria-expanded','false');
+$('#fullscreen').onclick=async()=>{
+  try{if(document.fullscreenElement)await document.exitFullscreen();else await (narration?.active?document.documentElement:$('#explorer')).requestFullscreen();}
+  catch(_){$('#fullscreen').title='Fullscreen is not available in this browser.';}
+};
+document.addEventListener('fullscreenchange',()=>$('#fullscreen').setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen':'Enter fullscreen'));
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
+window.addEventListener('storage',e=>{if(e.key==='djepa-theme')setTheme(e.newValue==='light'?'light':'dark');});
+window.addEventListener('resize',updateViewport);
+reducedMotion.addEventListener('change',()=>stop());
+setTheme(document.documentElement.dataset.theme||'dark');
+try {
+  const response=await fetch('static/data/explainer-pusht.json');
+  if(!response.ok)throw Error('Replay data unavailable');
+  record=await response.json();
+} catch(error) {
+  state.replay=false;console.warn(error.message);
+}
+try {
+  const response=await fetch('static/data/explainer-pair.json');
+  if(!response.ok)throw Error('Pair data unavailable');
+  const data=await response.json();
+  if(!record||data.start!==record.start||data.candidates.some(c=>!record.candidates.some(r=>r.id===c.id&&r.success===c.success&&r.sha256===c.trace_sha256)))throw Error('Pair / trace identity mismatch');
+  pair=data;
+} catch(error){console.warn(error.message);}
+const hash=location.hash.match(/^#stage-([1-6])$/);if(hash)state.stage=Number(hash[1])-1;
+modelMap=createModelMap({pause:()=>stop(),getStage:()=>state.stage,getLifting:()=>state.lifting});
+render();
+narration=createNarration({
+  stop:()=>stop(),
+  pause:()=>{narrationMotion.running=false;pauseValidationVideos();},
+  exit:()=>{modelMap.close();$('#tour-seek').max=totalDuration;updateAnimation();$('#previous').disabled=state.stage===0;$('#next').disabled=state.stage===5;},
+  frame:(f,motion)=>{
+    narrationMotion=motion;
+    const changed=state.stage!==f.stage||state.sources!==f.sources||state.lifting!==f.lifting||state.candidate!==f.candidate||!state.replay;
+    Object.assign(state,{stage:f.stage,elapsed:f.elapsed,sources:f.sources,lifting:f.lifting,candidate:f.candidate,bound:.2,replay:true,comparing:false,hoverCandidate:null});
+    if(changed)render(false);else updateAnimation();
+    modelMap.frame(f.architecture);
+    const explanation=$('#stage-options details');if(explanation)explanation.open=f.predictor;
+  },
+});

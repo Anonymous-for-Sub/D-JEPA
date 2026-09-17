@@ -1,0 +1,226 @@
+<p align="center">
+  <a href="https://anonymous-for-sub.github.io/D-JEPA">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/branding/jepa-full-logo-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="assets/branding/jepa-full-logo-light.svg">
+      <img src="assets/branding/jepa-full-logo-light.svg" alt="D-JEPA" width="600">
+    </picture>
+  </a>
+</p>
+
+<h1 align="center">D-JEPA: A Decision-Aligned Latent World Model</h1>
+
+<p align="center">
+  Learning decision-relevant structure from predicted futures.
+</p>
+
+<p align="center">
+  <a href="https://anonymous-for-sub.github.io/D-JEPA"><img src="https://img.shields.io/badge/Project-Website-A64CA6?style=flat&amp;labelColor=494150" alt="Project website"></a>
+  <a href="https://anonymous-for-sub.github.io/D-JEPA/#release-availability"><img src="https://img.shields.io/badge/Hugging_Face-Model-FFDB67?style=flat&amp;logo=huggingface&amp;logoColor=white&amp;labelColor=494150" alt="Model repository"></a>
+  <a href="https://anonymous-for-sub.github.io/D-JEPA/#release-availability"><img src="https://img.shields.io/badge/Hugging_Face-Dataset-8464A5?style=flat&amp;logo=huggingface&amp;logoColor=white&amp;labelColor=494150" alt="Decision-supervision dataset"></a>
+  <a href="https://github.com/Anonymous-for-Sub/D-JEPA"><img src="https://img.shields.io/badge/GitHub-Code-777083?style=flat&amp;logo=github&amp;logoColor=white&amp;labelColor=494150" alt="Code repository"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-A45AA8?style=flat&amp;labelColor=494150" alt="License: Apache-2.0"></a>
+</p>
+
+<p align="center"><sub>Anonymous review release. Checkpoints and the supervision dataset will be released after acceptance.</sub></p>
+
+<p align="center">
+  <a href="#overview">Overview</a> &nbsp;·&nbsp;
+  <a href="#quick-start">Quick Start</a> &nbsp;·&nbsp;
+  <a href="#results">Results</a> &nbsp;·&nbsp;
+  <a href="#documentation">Documentation</a>
+</p>
+
+## Overview
+
+**D-JEPA aligns predictive geometry with action selection.** It learns
+decision-relevant relations among predicted futures, combines evidence across
+predictive geometries, and expresses decision structure in latent future
+representations—all built on pretrained predictive models.
+
+This repository includes scientific modules, checkpoint loading, cached-feature
+inference and training, tests, and reproducibility tools. Task/module checkpoints will be
+released after acceptance; decision supervision, candidate inputs,
+fixed identities and result authorities are packaged in **one supervision ZIP**.
+
+The [offline robotics package](real_robot/README.md) is independently installed
+and maintained under `real_robot/`: recorded-data processing, V-JEPA 2-AC
+prediction, relational training, candidate scoring and offline planning.
+Simulation and robotics do not share environment-specific scripts or dependencies.
+Device-specific robot controllers and calibration are supplied by the user.
+
+Task interfaces are organized by application: [robotic manipulation](docs/ROBOTICS.md),
+[autonomous driving](docs/DRIVING.md), and the separate
+[physical-robot package](real_robot/README.md). Each guide identifies data inputs,
+training/calibration commands and evaluation outputs.
+
+### Method at a glance
+
+| Module | Role |
+|---|---|
+| [Relational alignment](src/djepa/models/relational.py) | Learn set-wise, bounded corrections from future–goal descriptors and ordinal coordinates. |
+| [Predictive plasticity](src/djepa/models/plasticity.py) | Adapt the final predictor with preservation losses. |
+| [Multi-geometry alignment](src/djepa/models/multi_geometry.py) | Combine two dense descriptors and four ordinal geometries. |
+| [Exact representation realization](src/djepa/models/exact_realization.py) | Encode terminal ordering in goal-distance geometry while preserving earlier futures. |
+| [Temporal transport](src/djepa/models/temporal_transport.py) | Learn bounded, same-action updates to five-step future representations. |
+| [Ordinal](src/djepa/models/ordinal.py) / [spatial adapters](src/djepa/models/granular.py) | Support task-local inputs and sparse supervision. |
+
+<details>
+<summary>Module composition and checkpoint dependencies</summary>
+
+These are configurations of **D-JEPA**, not separate competing methods. Legacy
+identifiers in raw result authorities and provenance retain the identities of
+the original experiments.
+
+The [predictor boundary](src/djepa/models/predictor_boundary.py) defines restricted
+adaptation; the [transport objective](src/djepa/objectives/transport_objective.py) accompanies
+the temporal module. See [checkpoint profiles](docs/CHECKPOINTS.md) for full-model
+dependencies and loading requirements.
+
+</details>
+
+## Release availability
+
+Model checkpoints and the supervision dataset will be released after acceptance.
+This anonymous release includes method code, tests, protocols, and visual demonstrations.
+Download and artifact-dependent commands below describe the post-acceptance workflow;
+no attributed model or dataset account is configured in this repository.
+
+## Quick Start
+
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-8464A5?style=flat&logo=python&logoColor=white&labelColor=494150)
+![PyTorch 2.3+](https://img.shields.io/badge/PyTorch-2.3%2B-8464A5?style=flat&logo=pytorch&logoColor=white&labelColor=494150)
+
+The lightweight package supports CPU execution. From the repository root:
+
+```bash
+pip install -r requirements.txt
+```
+
+For verified Hub downloads, install `pip install -e '.[download]'`. See the
+[reproduction guide](docs/REPRODUCING.md) for all configurations and populations.
+
+### Replay a released checkpoint
+
+Download and verify the **`pusht-relational/` profile** plus supervision:
+
+```bash
+python scripts/download_artifacts.py --profile pusht-relational --dataset
+python -m zipfile -e data/D-JEPA-supervision-v1.zip data
+python scripts/doctor.py --checkpoint checkpoints/pusht-relational
+python scripts/verify_dataset.py --data-root data/D-JEPA-supervision-v1 --checksums
+bash scripts/reproduce_paper.sh --only pusht-independent
+```
+
+This replays the relational checkpoint on the independent PushT population.
+Use `--resume` to verify and skip a completed, unchanged run. The
+[release matrix](configs/reproduction/paper.yaml) also includes Granular formal
+decisions and the two task-local calibration replays, with distinct run identities.
+See the [project website](https://anonymous-for-sub.github.io/D-JEPA#results) for reported results.
+
+<details>
+<summary>Evaluation protocol and file layout</summary>
+
+The checkpoint argument is the downloaded **profile directory**, containing
+`model.pt` and `config.json`, not its `.pt` file alone. Choices are computed from
+frozen inputs first; labels are opened only afterward for evaluation. Output
+files are never silently overwritten. This replays cached candidate decisions,
+not a new simulator run.
+
+See [protocols and schema](docs/PROTOCOLS.md) for candidate identities, split
+definitions and task-specific label semantics.
+
+</details>
+
+### Train a task-local alignment module
+
+```bash
+bash scripts/train.sh --config configs/training/pushobj.yaml --epochs 120
+```
+
+YAML configures the actual run; CLI options take precedence. Each run records
+its resolved settings. Paths are relative to the working directory. Existing
+`djepa-train` / `djepa-evaluate` commands and Python import paths remain supported.
+
+<details>
+<summary>Training objective and reproducibility</summary>
+
+This portable CPU trainer uses the released three-coordinate ordinal features,
+full-set success-mass objective, local ordering, preservation and calibration
+gate. It rejects overlapping train/calibration base identities. The historical
+paper checkpoints are released directly; this command is not a promise of
+bitwise-identical retraining across software/hardware versions.
+
+</details>
+
+For relational alignment and sparse spatial/multiview training, use the
+[module-training recipes](docs/MODULE_TRAINING.md). The
+[native execution guide](docs/NATIVE_REPRODUCING.md) covers feature preparation
+from upstream predictors and fixed-horizon physics rollouts, separately from
+cached replay. Run settings, inputs and output artifacts are recorded locally.
+
+## Results
+
+Visit the [project website](https://anonymous-for-sub.github.io/D-JEPA#results) for numerical
+comparisons and [qualitative demonstrations](https://anonymous-for-sub.github.io/D-JEPA#demonstrations).
+Machine-readable reference outcomes are distributed in the
+[Hugging Face supervision archive](https://anonymous-for-sub.github.io/D-JEPA/#release-availability),
+not as a separate results directory in this code repository.
+
+## Documentation
+
+| Guide | Contents |
+|---|---|
+| [Reproduction guide](docs/REPRODUCING.md) | Installation, verified downloads, YAML runs and summary scripts |
+| [Module training](docs/MODULE_TRAINING.md) | Relational and sparse-supervision training recipes |
+| [Native execution](docs/NATIVE_REPRODUCING.md) | Raw-input feature extraction, model factories and physics rollouts |
+| [Offline robotics](real_robot/README.md) | Separate installation, recorded observations, relational training and offline planning |
+| [Robotic manipulation](docs/ROBOTICS.md) | RoboTwin data, scene-conditioned candidates, preservation gates and matched execution |
+| [Autonomous driving](docs/DRIVING.md) | Drive-JEPA features, relation/risk training, label-free selection and evaluation |
+| [Release scope](docs/RELEASE_SCOPE.md) | Available workflows and future paper, video and experiment updates |
+| [Protocols and data schema](docs/PROTOCOLS.md) | Evaluation populations, identities and supervision semantics |
+| [Checkpoint profiles](docs/CHECKPOINTS.md) | Loading, composition and upstream dependencies |
+| [Validation](docs/VALIDATION.md) | Tested release scope and cached-decision replay |
+| [Source provenance](docs/SOURCE_PROVENANCE.json) | Source/export hashes for extracted modules |
+| [Website maintenance](docs/SITE.md) | Local preview, theme and author-artwork slots |
+
+### Repository map
+
+```text
+src/djepa/      models · objectives · data · evaluation · native · robotics · driving · cli
+real_robot/    independent offline robotics package · scripts · configs · tests
+configs/       training · evaluation · reproduction · native · robotics · driving
+scripts/       download · preflight · train · evaluate · reproduce · summarize · preview
+examples/      label-free inference and sparse metrics
+tests/         scientific behavior and workflow tests
+docs/          project website and technical documentation
+assets/        original brand assets
+```
+
+Legacy top-level Python modules forward to the organized implementations;
+scientific source hashes are mapped in [PACKAGE_LAYOUT.json](docs/PACKAGE_LAYOUT.json).
+
+### Run tests
+
+```bash
+bash scripts/smoke_test.sh
+```
+
+## License
+
+D-JEPA code, including the independent offline robotics package, is released
+under the [Apache License 2.0](LICENSE). Third-party components retain their
+original licenses; see [third-party notices](docs/THIRD_PARTY.md).
+Model checkpoints and datasets are governed by the terms provided with their
+respective releases.
+
+## Acknowledgments
+
+We thank the [JEPA](https://github.com/facebookresearch/jepa),
+[V-JEPA 2](https://github.com/facebookresearch/vjepa2), and
+[LeWorldModel (LeWM)](https://github.com/Mengarr/lewm) research teams for their
+foundational work and open-source resources. Our offline robotics package also
+builds on V-JEPA 2-AC for action-conditioned latent prediction.
+
+Additional implementation dependencies, recorded revisions and release terms
+are documented in [third-party notices](docs/THIRD_PARTY.md).
