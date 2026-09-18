@@ -22,7 +22,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-A45AA8?style=flat&amp;labelColor=494150" alt="License: Apache-2.0"></a>
 </p>
 
-<p align="center"><sub>Anonymous review release. Checkpoints and the supervision dataset will be released after acceptance.</sub></p>
+<p align="center"><sub>Checkpoints and the supervision dataset are publicly available. Identifying download links are withheld in this anonymous review copy.</sub></p>
 
 <p align="center">
   <a href="#overview">Overview</a> &nbsp;·&nbsp;
@@ -39,8 +39,8 @@ predictive geometries, and expresses decision structure in latent future
 representations—all built on pretrained predictive models.
 
 This repository includes scientific modules, checkpoint loading, cached-feature
-inference and training, tests, and reproducibility tools. Task/module checkpoints will be
-released after acceptance; decision supervision, candidate inputs,
+inference and training, tests, and reproducibility tools. Task/module checkpoints are
+publicly available; decision supervision, candidate inputs,
 fixed identities and result authorities are packaged in **one supervision ZIP**.
 
 The [offline robotics package](real_robot/README.md) is independently installed
@@ -81,9 +81,10 @@ dependencies and loading requirements.
 
 ## Release availability
 
-Model checkpoints and the supervision dataset will be released after acceptance.
+Model checkpoints and the supervision dataset are publicly available.
 This anonymous release includes method code, tests, protocols, and visual demonstrations.
-Download and artifact-dependent commands below describe the post-acceptance workflow;
+Identifying download links will be enabled in this copy after acceptance.
+Download and artifact-dependent commands below require those external artifacts;
 no attributed model or dataset account is configured in this repository.
 
 ## Quick Start
